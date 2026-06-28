@@ -11,15 +11,24 @@ const authEmail = (username) => {
   return clean.includes("@") ? clean : `${clean}@openlimits.local`;
 };
 
+const env = (...names) => names.map((name) => process.env[name]).find(Boolean);
+
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") return json(res, 200, { ok: true });
   if (req.method !== "POST") return json(res, 405, { error: "Method not allowed." });
 
   try {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = env("SUPABASE_URL", "VITE_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+    const serviceRoleKey = env(
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_SECRET_KEY",
+      "SUPABASE_SERVICE_KEY",
+      "SUPABASE_SERVICE_ROLE",
+    );
     if (!supabaseUrl || !serviceRoleKey) {
-      throw new Error("Missing server Supabase environment variables.");
+      throw new Error(
+        "Missing server Supabase environment variables. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel, then redeploy.",
+      );
     }
 
     const token = req.headers.authorization?.replace("Bearer ", "");

@@ -62,21 +62,9 @@ Password: admin123
 
 Admin creates employee IDs/passwords from the app through `/api/create-user`, a Vercel server endpoint. This needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
 
-The Supabase Edge Function is optional backup infrastructure. If you want to deploy it too:
+The older Supabase Edge Function in this repository is no longer required by the app. The Vercel endpoint is the active user-creation path.
 
-Deploy:
-
-```bash
-supabase functions deploy create-user --project-ref ltyqshfaiodglkvcebkw
-```
-
-Set the function secret:
-
-```bash
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key> --project-ref ltyqshfaiodglkvcebkw
-```
-
-Do not put this service role key in Vercel.
+Do not prefix the service role key with `VITE_`. It must stay server-only.
 
 ## 6. Employee accounts
 

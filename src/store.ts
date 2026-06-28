@@ -334,14 +334,6 @@ async function createAccountWithVercelApi(account: Account, password: string) {
   if (!response.ok || result.error) throw new Error(result.error || "Vercel account endpoint failed.");
 }
 
-async function createAccountWithEdgeFunction(account: Account, password: string) {
-  const { data, error } = await client().functions.invoke("create-user", {
-    body: accountPayload(account, password),
-  });
-  if (error) throw new Error(error.message);
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
-}
-
 async function insertActivity(entry: Omit<ActivityLogEntry, "id" | "createdAt">) {
   await expectOk(
     client().from("activity_log").insert({
@@ -770,17 +762,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         createdAt: nowISO(),
       };
 
-      try {
-        await createAccountWithVercelApi(item, account.passwordHash);
-      } catch (apiError) {
-        try {
-          await createAccountWithEdgeFunction(item, account.passwordHash);
-        } catch (edgeError) {
-          const apiMessage = apiError instanceof Error ? apiError.message : "Vercel API failed";
-          const edgeMessage = edgeError instanceof Error ? edgeError.message : "Supabase Edge Function failed";
-          throw new Error(`Could not create account. Server API: ${apiMessage}. Edge Function: ${edgeMessage}`);
-        }
-      }
+      await createAccountWithVercelApi(item, account.passwordHash);
 
       await insertActivity({ entityType: "account", entityId: id, actorId: actor(state)!.id, action: "Created account" });
       await get().loadRemoteData();
