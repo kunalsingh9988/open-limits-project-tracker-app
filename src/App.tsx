@@ -1535,7 +1535,33 @@ function Team() {
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const [draft, setDraft] = useState<Partial<Account>>({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" });
   const [roleDraft, setRoleDraft] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountStatus, setAccountStatus] = useState<{ tone: "success" | "error" | "info"; message: string }>();
   if (user?.accessRole !== "Admin") return <Navigate to="/dashboard" replace />;
+
+  async function handleAddAccount() {
+    const username = draft.username?.trim();
+    if (!draft.name?.trim() || !username || !draft.passwordHash?.trim()) {
+      setAccountStatus({ tone: "error", message: "Name, username, and password are required." });
+      return;
+    }
+
+    setAccountBusy(true);
+    setAccountStatus({ tone: "info", message: "Creating account in Supabase..." });
+    try {
+      await state.upsertAccount(draft);
+      setDraft({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" });
+      setAccountStatus({ tone: "success", message: `Created ${username}. They can now log in with ID ${username}.` });
+    } catch (error) {
+      setAccountStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not create account.",
+      });
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
   return (
     <>
       <PageTitle title="Team & Roles" subtitle="Admin-only account and job role management." />
@@ -1555,7 +1581,17 @@ function Team() {
           </select>
         </Field>
         <Field label="Color tag"><input className={inputClass()} type="color" value={draft.colorTag || "#5B5FEF"} onChange={(e) => setDraft({ ...draft, colorTag: e.target.value })} /></Field>
-        <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} onClick={() => { state.upsertAccount(draft); setDraft({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" }); }}>Add account</Button></div>
+        <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} disabled={accountBusy} onClick={handleAddAccount}>{accountBusy ? "Adding..." : "Add account"}</Button></div>
+        {accountStatus ? (
+          <div className={cn(
+            "rounded-md px-3 py-2 text-sm md:col-span-4",
+            accountStatus.tone === "success" && "border border-emerald-200 bg-emerald-50 text-emerald-800",
+            accountStatus.tone === "error" && "border border-red-200 bg-red-50 text-red-800",
+            accountStatus.tone === "info" && "border border-blue-200 bg-blue-50 text-blue-800",
+          )}>
+            {accountStatus.message}
+          </div>
+        ) : null}
         <p className="text-xs leading-5 text-gray-500 md:col-span-4">
           New users are created in Supabase Auth with username@openlimits.local. They log in here with the simple username and password you set.
         </p>

@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { RealtimeChannel } from "@supabase/supabase-js";
-import { supabase, isSupabaseConfigured } from "./lib/supabase";
+import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import { supabase, isSupabaseConfigured, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import type {
   Account,
   ActivityLogEntry,
@@ -82,6 +82,11 @@ function client() {
 function authEmail(username: string) {
   const clean = username.trim().toLowerCase();
   return clean.includes("@") ? clean : `${clean}@openlimits.local`;
+}
+
+function profileId(username: string) {
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `acct-${clean || uid("user")}`;
 }
 
 function actor(state: AppState) {
@@ -297,6 +302,58 @@ const profileRow = (account: Account) => ({
   active: account.active,
   created_at: account.createdAt,
 });
+
+async function createAccountWithBrowserAuth(account: Account, password: string, authProfileId: string) {
+  if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase environment variables are missing.");
+
+  const signupClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  const { data, error } = await signupClient.auth.signUp({
+    email: authEmail(account.username),
+    password,
+    options: {
+      data: {
+        username: account.username,
+        display_name: account.name,
+      },
+    },
+  });
+  if (error) throw error;
+
+  const authUserId = data.user?.id;
+  if (!authUserId) {
+    throw new Error("Supabase Auth did not return the new user. Check that email confirmation is turned off, or deploy the create-user function.");
+  }
+
+  await expectOk(client().from("profiles").upsert({
+    ...profileRow(account),
+    id: authProfileId,
+    auth_user_id: authUserId,
+  }).select());
+}
+
+async function createAccountWithFunction(account: Account, password: string) {
+  const { data, error } = await client().functions.invoke("create-user", {
+    body: {
+      id: account.id,
+      name: account.name,
+      username: account.username,
+      password,
+      accessRole: account.accessRole,
+      jobRoleId: account.jobRoleId || null,
+      role: account.role,
+      colorTag: account.colorTag,
+      active: account.active,
+    },
+  });
+  if (error) throw new Error(error.message);
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+}
 
 async function insertActivity(entry: Omit<ActivityLogEntry, "id" | "createdAt">) {
   await expectOk(
@@ -710,21 +767,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!account.username || !account.passwordHash) {
         throw new Error("Username and password are required for new users.");
       }
-      const { data, error } = await client().functions.invoke("create-user", {
-        body: {
-          name: baseName,
-          username: account.username,
-          password: account.passwordHash,
-          accessRole: account.accessRole || "Employee",
-          jobRoleId: account.jobRoleId || state.jobRoles[0]?.id || null,
-          role: account.role || "Team Member",
-          colorTag: account.colorTag || "#5B5FEF",
-          active: account.active ?? true,
-        },
-      });
-      if (error) throw new Error(error.message);
-      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
-      await insertActivity({ entityType: "account", entityId: `acct-${account.username}`, actorId: actor(state)!.id, action: "Created account" });
+      const username = account.username.trim().toLowerCase();
+      const id = profileId(username);
+      const roleId = account.jobRoleId || state.jobRoles[0]?.id || "";
+      const item: Account = {
+        id,
+        name: baseName.trim(),
+        username,
+        passwordHash: "",
+        accessRole: account.accessRole || "Employee",
+        jobRoleId: roleId,
+        role: account.role || state.jobRoles.find((role) => role.id === roleId)?.name || "Team Member",
+        colorTag: account.colorTag || "#5B5FEF",
+        active: account.active ?? true,
+        createdAt: nowISO(),
+      };
+
+      try {
+        await createAccountWithFunction(item, account.passwordHash);
+      } catch (functionError) {
+        try {
+          await createAccountWithBrowserAuth(item, account.passwordHash, id);
+        } catch (fallbackError) {
+          const firstMessage = functionError instanceof Error ? functionError.message : "create-user function failed";
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "browser signup failed";
+          throw new Error(`Could not create account. Function: ${firstMessage}. Browser signup: ${fallbackMessage}`);
+        }
+      }
+
+      await insertActivity({ entityType: "account", entityId: id, actorId: actor(state)!.id, action: "Created account" });
       await get().loadRemoteData();
       return;
     }
