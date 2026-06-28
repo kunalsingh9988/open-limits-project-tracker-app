@@ -705,6 +705,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     requireAdmin(state);
     const baseName = account.name || "New teammate";
+    const isNew = !account.id;
+    if (isNew) {
+      if (!account.username || !account.passwordHash) {
+        throw new Error("Username and password are required for new users.");
+      }
+      const { data, error } = await client().functions.invoke("create-user", {
+        body: {
+          name: baseName,
+          username: account.username,
+          password: account.passwordHash,
+          accessRole: account.accessRole || "Employee",
+          jobRoleId: account.jobRoleId || state.jobRoles[0]?.id || null,
+          role: account.role || "Team Member",
+          colorTag: account.colorTag || "#5B5FEF",
+          active: account.active ?? true,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+      await insertActivity({ entityType: "account", entityId: `acct-${account.username}`, actorId: actor(state)!.id, action: "Created account" });
+      await get().loadRemoteData();
+      return;
+    }
     const item: Account = {
       id: account.id || uid("acct"),
       name: baseName,
@@ -731,7 +754,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async resetAccountPassword() {
-    throw new Error("Passwords are managed by Supabase Auth.");
+    throw new Error("Use Supabase Auth dashboard to reset passwords, or create a new password reset function.");
   },
 
   async upsertJobRole(role) {

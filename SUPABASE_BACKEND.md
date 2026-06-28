@@ -43,24 +43,59 @@ On the login screen:
 
 1. Choose `Admin`.
 2. Enter username `admin`.
-3. Enter a password.
+3. Enter password `admin123`.
 4. Click `Create first admin`.
 
 The app creates a Supabase Auth user using `admin@openlimits.local` and inserts the first admin profile.
 
-After that, log in with username `admin` and the same password.
-
-## 5. Employee accounts
-
-Admin can create employee profiles inside `Team & Roles`.
-
-For each employee, create a matching Supabase Auth user with email:
+After that, log in with:
 
 ```txt
-username@openlimits.local
+ID: admin
+Password: admin123
 ```
 
-Then set that user's UUID into `profiles.auth_user_id`.
+## 5. Deploy the user creation function
+
+Admin creates employee IDs/passwords from the app through a Supabase Edge Function.
+
+Deploy:
+
+```bash
+supabase functions deploy create-user --project-ref ltyqshfaiodglkvcebkw
+```
+
+Set the function secret:
+
+```bash
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key> --project-ref ltyqshfaiodglkvcebkw
+```
+
+Do not put this service role key in Vercel.
+
+## 6. Employee accounts
+
+Admin can create employee IDs and passwords inside `Team & Roles`.
+
+Example:
+
+```txt
+Name: Kunal Singh
+Username: kunal
+Password: kunal123
+```
+
+The app creates:
+
+- a Supabase Auth user: `kunal@openlimits.local`
+- a profile row in `profiles`
+
+The employee logs in with:
+
+```txt
+ID: kunal
+Password: kunal123
+```
 
 ## Security
 

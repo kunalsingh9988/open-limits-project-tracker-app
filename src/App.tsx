@@ -1542,6 +1542,7 @@ function Team() {
       <section className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4">
         <Field label="Name"><input className={inputClass()} value={draft.name || ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
         <Field label="Username"><input className={inputClass()} value={draft.username || ""} onChange={(e) => setDraft({ ...draft, username: e.target.value })} /></Field>
+        <Field label="Password"><input className={inputClass()} type="password" value={draft.passwordHash || ""} onChange={(e) => setDraft({ ...draft, passwordHash: e.target.value })} /></Field>
         <Field label="Job role">
           <select className={inputClass()} value={draft.jobRoleId || state.jobRoles[0]?.id} onChange={(e) => setDraft({ ...draft, jobRoleId: e.target.value, role: state.jobRoles.find((role) => role.id === e.target.value)?.name })}>
             {state.jobRoles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
@@ -1555,6 +1556,9 @@ function Team() {
         </Field>
         <Field label="Color tag"><input className={inputClass()} type="color" value={draft.colorTag || "#5B5FEF"} onChange={(e) => setDraft({ ...draft, colorTag: e.target.value })} /></Field>
         <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} onClick={() => { state.upsertAccount(draft); setDraft({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" }); }}>Add account</Button></div>
+        <p className="text-xs leading-5 text-gray-500 md:col-span-4">
+          New users are created in Supabase Auth with username@openlimits.local. They log in here with the simple username and password you set.
+        </p>
       </section>
       <section className="mb-5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <h2 className="mb-3 font-semibold">Job Roles</h2>
