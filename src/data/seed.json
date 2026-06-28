@@ -1,0 +1,317 @@
+{
+  "version": "fallback-2026-06-28",
+  "accounts": [
+    {
+      "id": "acct-admin",
+      "name": "Open Limits Admin",
+      "username": "admin",
+      "passwordHash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+      "accessRole": "Admin",
+      "jobRoleId": "role-dev-pm",
+      "role": "Operations Lead",
+      "colorTag": "#5B5FEF",
+      "active": true,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "acct-kunal",
+      "name": "Kunal Sharma",
+      "username": "kunal",
+      "passwordHash": "1ae2a10b73e3166eeda04d4302c4d613dcf9f4edf5b6914a3052bc178e388dfd",
+      "accessRole": "Employee",
+      "jobRoleId": "role-dev-pm",
+      "role": "Developer & PM",
+      "colorTag": "#2563EB",
+      "active": true,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "acct-harsh",
+      "name": "Harsh Mehta",
+      "username": "harsh",
+      "passwordHash": "76e3d3026ad4ee1fe043d9e09f35c5b34f4e7072dbdbdbb28ee1beb5fb4553cc",
+      "accessRole": "Employee",
+      "jobRoleId": "role-des",
+      "role": "Designer",
+      "colorTag": "#EA580C",
+      "active": true,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "acct-sudhir",
+      "name": "Sudhir Rao",
+      "username": "sudhir",
+      "passwordHash": "50310c52aee575a8f33e0cc2c456a5ec734e0850a2a910334cc7f004c1c312f9",
+      "accessRole": "Employee",
+      "jobRoleId": "role-dev",
+      "role": "Developer",
+      "colorTag": "#059669",
+      "active": true,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "acct-avni",
+      "name": "Avni Shah",
+      "username": "avni",
+      "passwordHash": "06260031ff427dc8d559e29278bfbe17420c86d746003948ed8d24ac2c7d734d",
+      "accessRole": "Employee",
+      "jobRoleId": "role-des-pm",
+      "role": "Designer & PM",
+      "colorTag": "#7C3AED",
+      "active": true,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    }
+  ],
+  "jobRoles": [
+    {
+      "id": "role-dev",
+      "name": "Developer"
+    },
+    {
+      "id": "role-des",
+      "name": "Designer"
+    },
+    {
+      "id": "role-dev-pm",
+      "name": "Developer & PM"
+    },
+    {
+      "id": "role-des-pm",
+      "name": "Designer & PM"
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-aura",
+      "projectName": "Aura Skin Shopify Refresh",
+      "clientUsername": "aura.skin",
+      "mainDeveloperId": "acct-kunal",
+      "designerId": "acct-harsh",
+      "deadline": "2026-06-30",
+      "status": "Development In Progress",
+      "isPriority": true,
+      "delayBlocker": "",
+      "previewLink": "https://example.com/aura-preview",
+      "figmaLink": "https://figma.com/file/aura",
+      "driveAssetsLink": "https://drive.google.com/aura-assets",
+      "checklist": [
+        {
+          "text": "Homepage sections",
+          "done": true
+        },
+        {
+          "text": "Product page QA",
+          "done": false
+        },
+        {
+          "text": "Mobile pass",
+          "done": false
+        }
+      ],
+      "tags": [
+        "Shopify",
+        "Priority"
+      ],
+      "briefDocLink": "https://docs.google.com/aura-brief",
+      "notesLastUpdate": "Awaiting final product photos.",
+      "clientChatsLink": "https://chat.example.com/aura",
+      "createdAt": "2026-06-28T09:59:30.910Z",
+      "updatedAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "proj-nova",
+      "projectName": "Nova Home Landing Page",
+      "clientUsername": "novahome",
+      "mainDeveloperId": "acct-sudhir",
+      "designerId": "acct-avni",
+      "deadline": "2026-06-27",
+      "status": "Revision",
+      "isPriority": false,
+      "delayBlocker": "Client has not approved hero copy.",
+      "previewLink": "https://example.com/nova",
+      "checklist": [
+        {
+          "text": "Design approval",
+          "done": true
+        },
+        {
+          "text": "Revision copy",
+          "done": false
+        }
+      ],
+      "tags": [
+        "Landing",
+        "Copy"
+      ],
+      "createdAt": "2026-06-28T09:59:30.910Z",
+      "updatedAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "proj-calm",
+      "projectName": "CalmCart Delivered Store",
+      "clientUsername": "calmcart",
+      "mainDeveloperId": "acct-kunal",
+      "designerId": "acct-avni",
+      "deadline": "2026-06-18",
+      "status": "Delivered",
+      "isPriority": false,
+      "previewLink": "https://example.com/calmcart",
+      "checklist": [
+        {
+          "text": "Handover complete",
+          "done": true
+        }
+      ],
+      "tags": [
+        "Delivered"
+      ],
+      "clientChatsLink": "https://chat.example.com/calmcart",
+      "createdAt": "2026-06-28T09:59:30.910Z",
+      "deliveredAt": "2026-06-25",
+      "updatedAt": "2026-06-28T09:59:30.910Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-aura-pdp",
+      "personId": "acct-kunal",
+      "projectId": "proj-aura",
+      "clientOrStore": "aura.skin",
+      "taskDescription": "Finish product page responsive QA",
+      "priority": "High",
+      "deadline": "2026-06-29",
+      "status": "In Progress",
+      "notes": "Desktop pass is done.",
+      "assignedById": "acct-admin",
+      "checklist": [
+        {
+          "text": "Check variants",
+          "done": true
+        },
+        {
+          "text": "Check sticky ATC",
+          "done": false
+        }
+      ],
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "task-aura-visuals",
+      "personId": "acct-harsh",
+      "projectId": "proj-aura",
+      "clientOrStore": "aura.skin",
+      "taskDescription": "Export homepage image replacements",
+      "priority": "Medium",
+      "deadline": "2026-06-28",
+      "status": "To Do",
+      "assignedById": "acct-admin",
+      "checklist": [],
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    },
+    {
+      "id": "task-nova-copy",
+      "personId": "acct-avni",
+      "projectId": "proj-nova",
+      "clientOrStore": "novahome",
+      "taskDescription": "Apply approved revision copy",
+      "priority": "High",
+      "deadline": "2026-06-27",
+      "status": "Client Waiting",
+      "notes": "Waiting on final headline.",
+      "assignedById": "acct-admin",
+      "checklist": [
+        {
+          "text": "Send reminder",
+          "done": true
+        }
+      ],
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    }
+  ],
+  "dailyUpdates": [
+    {
+      "id": "upd-aura-today",
+      "projectId": "proj-aura",
+      "date": "2026-06-28",
+      "morningUpdate": "Homepage sections are complete. Product QA is underway.",
+      "eveningUpdate": "",
+      "videoRecordingLink": "",
+      "authorId": "acct-kunal"
+    }
+  ],
+  "calendarSlots": [
+    {
+      "id": "cal-kunal-10",
+      "teamMemberId": "acct-kunal",
+      "accountId": "acct-kunal",
+      "date": "2026-06-28",
+      "startTime": "10:00",
+      "taskText": "Aura PDP QA",
+      "status": "Working",
+      "priority": "High",
+      "taskId": "task-aura-pdp"
+    },
+    {
+      "id": "cal-harsh-12",
+      "teamMemberId": "acct-harsh",
+      "accountId": "acct-harsh",
+      "date": "2026-06-28",
+      "startTime": "12:00",
+      "taskText": "Aura visual exports",
+      "status": "To Do",
+      "priority": "Medium",
+      "taskId": "task-aura-visuals"
+    }
+  ],
+  "resourceLinks": [
+    {
+      "id": "res-sop-launch",
+      "category": "SOP",
+      "name": "Store Launch QA SOP",
+      "value": "https://docs.example.com/store-launch-qa",
+      "isSensitive": false
+    },
+    {
+      "id": "res-theme-account",
+      "category": "Account",
+      "name": "Theme library login",
+      "value": "theme@example.com / theme-pass-2026",
+      "isSensitive": true
+    },
+    {
+      "id": "res-inspo-layouts",
+      "category": "Inspiration",
+      "name": "High-converting PDP patterns",
+      "value": "https://example.com/pdp-inspiration",
+      "isSensitive": false
+    }
+  ],
+  "storePreviews": [
+    {
+      "id": "store-aura",
+      "storeName": "Aura Skin",
+      "previewLink": "https://aura-preview.example.com",
+      "password": "aura2026",
+      "googleSearchLink": "https://www.google.com/search?q=Aura+Skin"
+    },
+    {
+      "id": "store-calmcart",
+      "storeName": "CalmCart",
+      "previewLink": "https://calmcart.example.com",
+      "password": "delivered",
+      "googleSearchLink": "https://www.google.com/search?q=CalmCart"
+    }
+  ],
+  "comments": [],
+  "activityLog": [],
+  "notifications": [
+    {
+      "id": "notif-kunal-task",
+      "recipientId": "acct-kunal",
+      "message": "You have a high priority task due tomorrow.",
+      "link": "/tasks",
+      "read": false,
+      "createdAt": "2026-06-28T09:59:30.910Z"
+    }
+  ]
+}

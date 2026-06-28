@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Open Limits logo">
+  <defs>
+    <linearGradient id="gold" x1="30" y1="18" x2="170" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B78A52"/>
+      <stop offset="1" stop-color="#76562B"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="28" fill="#fff"/>
+  <path d="M54 24h74c6 0 10 5 8 11l-21 70c-1 5-6 8-11 8H30c-6 0-10-5-8-11l21-70c1-5 6-8 11-8Z" fill="url(#gold)"/>
+  <path d="M149 63h31c6 0 10 5 8 11l-13 43c-1 5-6 8-11 8h-31c-6 0-10-5-8-11l13-43c1-5 6-8 11-8Z" fill="url(#gold)"/>
+  <path d="M28 124h42c6 0 10 5 8 11l-13 42c-1 5-6 8-11 8H12c-6 0-10-5-8-11l13-42c1-5 6-8 11-8Z" fill="url(#gold)"/>
+  <path d="M92 124h70c6 0 10 5 8 11l-14 47c-1 5-6 8-11 8H75c-6 0-10-5-8-11l14-47c1-5 6-8 11-8Z" fill="url(#gold)"/>
+</svg>

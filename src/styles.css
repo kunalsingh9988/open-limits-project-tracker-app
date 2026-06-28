@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --ink: #14171f;
+  --muted: #6b7280;
+  --accent: #5b5fef;
+  --alert: #ff6b4a;
+  --gold: #a8793e;
+  --mint: #10b981;
+  --sky: #2563eb;
+  font-family:
+    Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(91, 95, 239, 0.04), transparent 260px),
+    var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.mono {
+  font-family:
+    "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #d7dae4;
+  border-radius: 999px;
+}
