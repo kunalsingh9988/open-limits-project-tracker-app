@@ -53,6 +53,8 @@ import {
 } from "recharts";
 import { addDays, format, startOfWeek } from "date-fns";
 import { useAppStore } from "./store";
+import { isSupabaseConfigured } from "./lib/supabase";
+import { pushLocalDataToSupabase } from "./lib/supabaseSync";
 import {
   PRIORITIES,
   PROJECT_STATUSES,
@@ -1595,6 +1597,7 @@ function Team() {
 function SettingsData() {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
+  const [syncStatus, setSyncStatus] = useState<string>("");
   if (user?.accessRole !== "Admin") return <Navigate to="/dashboard" replace />;
   return (
     <>
@@ -1618,8 +1621,26 @@ function SettingsData() {
           <Button tone="danger" icon={<RefreshCcw size={16} />} onClick={() => confirm("Reset all local data to seed?") && state.resetToSeed()}>
             Reset to seed
           </Button>
+          <Button
+            icon={<Upload size={16} />}
+            onClick={async () => {
+              try {
+                setSyncStatus("Syncing to Supabase...");
+                await pushLocalDataToSupabase(state.exportData());
+                setSyncStatus("Supabase sync complete.");
+              } catch (error) {
+                setSyncStatus(error instanceof Error ? error.message : "Supabase sync failed.");
+              }
+            }}
+            disabled={!isSupabaseConfigured}
+          >
+            Sync to Supabase
+          </Button>
         </div>
-        <p className="mt-4 text-sm text-gray-500">Data is stored in browser localStorage under the openlimits namespace.</p>
+        <p className="mt-4 text-sm text-gray-500">
+          Data is stored in browser localStorage under the openlimits namespace. Supabase sync becomes available when environment variables and database schema are configured.
+        </p>
+        {syncStatus ? <p className="mt-3 text-sm font-medium text-gray-700">{syncStatus}</p> : null}
       </section>
     </>
   );

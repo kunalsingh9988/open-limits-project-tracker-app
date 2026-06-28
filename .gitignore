@@ -5,3 +5,4 @@ dist/
 open-limits-verification.png
 .env
 .env.*
+!.env.example
