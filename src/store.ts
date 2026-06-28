@@ -351,6 +351,22 @@ async function updateAccountPasswordWithVercelApi(accountId: string, password: s
   if (!response.ok || result.error) throw new Error(result.error || "Vercel password endpoint failed.");
 }
 
+async function ensureAdminProfileWithVercelApi() {
+  const { data } = await client().auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Admin session is missing. Log out and log in again.");
+
+  const response = await fetch("/api/ensure-admin-profile", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) throw new Error(result.error || "Admin profile repair failed.");
+}
+
 async function insertActivity(entry: Omit<ActivityLogEntry, "id" | "createdAt">) {
   await expectOk(
     client().from("activity_log").insert({
@@ -451,7 +467,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (error) throw error;
       await get().loadRemoteData();
       get().subscribeRealtime();
-      const user = actor(get());
+      let user = actor(get());
+      if ((!user || !user.active) && username.trim().toLowerCase() === "admin") {
+        await ensureAdminProfileWithVercelApi();
+        await get().loadRemoteData();
+        user = actor(get());
+      }
       if (!user || !user.active) throw new Error("No active app profile is linked to this Supabase user.");
       set({ authError: undefined });
       return true;
