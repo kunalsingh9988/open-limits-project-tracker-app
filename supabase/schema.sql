@@ -151,7 +151,7 @@ create or replace function public.current_profile_id()
 returns text
 language sql
 stable
-security invoker
+security definer
 set search_path = public
 as $$
   select id from public.profiles
@@ -164,7 +164,7 @@ create or replace function public.is_admin()
 returns boolean
 language sql
 stable
-security invoker
+security definer
 set search_path = public
 as $$
   select exists (
@@ -179,7 +179,7 @@ create or replace function public.is_assigned_project(project_row public.project
 returns boolean
 language sql
 stable
-security invoker
+security definer
 set search_path = public
 as $$
   select public.current_profile_id() in (
@@ -193,7 +193,7 @@ create or replace function public.can_access_project(project_id text)
 returns boolean
 language sql
 stable
-security invoker
+security definer
 set search_path = public
 as $$
   select exists (
@@ -254,6 +254,16 @@ drop policy if exists "admins insert profiles" on public.profiles;
 create policy "admins insert profiles" on public.profiles
 for insert to authenticated
 with check (public.is_admin());
+
+drop policy if exists "first admin bootstrap" on public.profiles;
+create policy "first admin bootstrap" on public.profiles
+for insert to authenticated
+with check (
+  not exists (select 1 from public.profiles)
+  and auth_user_id = (select auth.uid())
+  and access_role = 'Admin'
+  and active = true
+);
 
 drop policy if exists "admins delete profiles" on public.profiles;
 create policy "admins delete profiles" on public.profiles
@@ -411,3 +421,21 @@ grant select, insert, update, delete on public.store_previews to authenticated;
 grant select, insert on public.comments to authenticated;
 grant select, insert on public.activity_log to authenticated;
 grant select, insert, update on public.notifications to authenticated;
+
+do $$
+begin
+  alter publication supabase_realtime add table
+    public.job_roles,
+    public.profiles,
+    public.projects,
+    public.tasks,
+    public.daily_client_updates,
+    public.calendar_slots,
+    public.resource_links,
+    public.store_previews,
+    public.comments,
+    public.activity_log,
+    public.notifications;
+exception
+  when duplicate_object then null;
+end $$;

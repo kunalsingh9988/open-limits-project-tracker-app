@@ -1,43 +1,67 @@
 # Supabase Backend Setup
 
-## 1. Apply the database schema
+The app now uses Supabase as the only data source. Local JSON import/export/reset and manual sync are removed.
 
-Open Supabase Dashboard → SQL Editor and run:
+## 1. Apply or update the schema
 
-```sql
--- paste the contents of supabase/schema.sql
+Supabase Dashboard -> SQL Editor -> New query.
+
+Paste and run the full contents of:
+
+```txt
+supabase/schema.sql
 ```
 
-The schema creates real Postgres tables, explicit grants, and Row Level Security policies.
+## 2. Clear old app data
 
-## 2. Configure environment variables
+If you want the app to start completely empty, run this after the schema:
 
-Set these in Vercel and in local `.env.local`:
+```txt
+supabase/empty_database.sql
+```
+
+This removes app tables only. It does not delete Supabase Auth users.
+
+## 3. Vercel environment variables
+
+Vercel Project -> Settings -> Environment Variables.
+
+Add:
 
 ```bash
 VITE_SUPABASE_URL=https://ltyqshfaiodglkvcebkw.supabase.co
-VITE_SUPABASE_ANON_KEY=<publishable-or-anon-key>
+VITE_SUPABASE_ANON_KEY=<your publishable or anon key>
 ```
 
-Never put the service role key or secret key in frontend code.
+Apply to Production, Preview, and Development, then redeploy.
 
-## 3. Create Supabase Auth users
+## 4. Create the first admin
 
-Create email/password users in Supabase Auth. Then connect each user to an app profile by setting
-`profiles.auth_user_id` to that user's `auth.users.id`.
+Open the deployed app.
 
-Current profile IDs can stay as existing app IDs such as `acct-admin`, `acct-kunal`, and `acct-harsh`.
+On the login screen:
 
-## 4. Sync current app data
+1. Choose `Admin`.
+2. Enter username `admin`.
+3. Enter a password.
+4. Click `Create first admin`.
 
-After the schema and environment variables are configured:
+The app creates a Supabase Auth user using `admin@openlimits.local` and inserts the first admin profile.
 
-1. Log in as Admin.
-2. Go to Settings.
-3. Click `Sync to Supabase`.
+After that, log in with username `admin` and the same password.
 
-This uploads current local app data into Supabase tables.
+## 5. Employee accounts
 
-## 5. Security note
+Admin can create employee profiles inside `Team & Roles`.
 
-If service role or secret keys were shared in chat or screenshots, rotate them in Supabase Dashboard before production use.
+For each employee, create a matching Supabase Auth user with email:
+
+```txt
+username@openlimits.local
+```
+
+Then set that user's UUID into `profiles.auth_user_id`.
+
+## Security
+
+Never put service role or secret keys in frontend/Vercel public env vars. Rotate any service/secret keys that were shared outside the Supabase dashboard.

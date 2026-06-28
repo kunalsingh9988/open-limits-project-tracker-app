@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -14,10 +14,8 @@ import {
   Bell,
   CalendarDays,
   Check,
-  ChevronDown,
   ClipboardList,
   Copy,
-  Download,
   Eye,
   EyeOff,
   Flag,
@@ -30,14 +28,12 @@ import {
   LogOut,
   MessageSquare,
   Plus,
-  RefreshCcw,
   Search,
   Settings,
   Shield,
   Sparkles,
   Star,
   Trash2,
-  Upload,
   Users,
 } from "lucide-react";
 import {
@@ -53,8 +49,6 @@ import {
 } from "recharts";
 import { addDays, format, startOfWeek } from "date-fns";
 import { useAppStore } from "./store";
-import { isSupabaseConfigured } from "./lib/supabase";
-import { pushLocalDataToSupabase } from "./lib/supabaseSync";
 import {
   PRIORITIES,
   PROJECT_STATUSES,
@@ -79,11 +73,9 @@ import {
   checklistPercent,
   copyText,
   daysLeft,
-  downloadJson,
   isOverdue,
   projectDone,
   ratingFor,
-  readJsonFile,
   scopedProjects,
   scopedTasks,
   taskDone,
@@ -209,6 +201,7 @@ function Pill({ children, className }: { children: ReactNode; className?: string
 
 function Login() {
   const login = useAppStore((state) => state.login);
+  const bootstrapFirstAdmin = useAppStore((state) => state.bootstrapFirstAdmin);
   const authError = useAppStore((state) => state.authError);
   const [loginMode, setLoginMode] = useState<"Admin" | "Employee">("Admin");
   const [username, setUsername] = useState("admin");
@@ -231,6 +224,13 @@ function Login() {
     event.preventDefault();
     setLoading(true);
     const ok = await login(username, password);
+    setLoading(false);
+    if (ok) navigate("/dashboard");
+  }
+
+  async function createFirstAdmin() {
+    setLoading(true);
+    const ok = await bootstrapFirstAdmin("Open Limits Admin", username, password);
     setLoading(false);
     if (ok) navigate("/dashboard");
   }
@@ -282,9 +282,14 @@ function Login() {
           <Button type="submit" tone="primary" icon={<Lock size={16} />} disabled={loading}>
             {loading ? "Signing in" : `Log in as ${loginMode}`}
           </Button>
+          {loginMode === "Admin" ? (
+            <Button icon={<Shield size={16} />} onClick={createFirstAdmin} disabled={loading}>
+              Create first admin
+            </Button>
+          ) : null}
         </div>
         <p className="mt-5 rounded-md bg-gray-50 p-3 text-xs leading-5 text-gray-600">
-          Default admin login: admin / admin123. Employees use firstname123, for example kunal123.
+          Use Supabase Auth credentials. Usernames map to username@openlimits.local, so admin can log in with admin after the first admin is created.
         </p>
       </form>
     </main>
@@ -1582,7 +1587,7 @@ function Team() {
                   <input type="checkbox" checked={account.active} onChange={(e) => state.upsertAccount({ ...account, active: e.target.checked })} />
                 </td>
                 <td className="flex gap-2 px-3 py-3">
-                  <Button icon={<RefreshCcw size={16} />} onClick={() => state.resetAccountPassword(account.id, `${account.username}123`)}>Reset password</Button>
+                  <Pill className="bg-gray-100 text-gray-600">Supabase Auth</Pill>
                   {account.id !== "acct-admin" ? <IconButton label="Delete account" tone="danger" onClick={() => state.deleteAccount(account.id)}><Trash2 size={16} /></IconButton> : null}
                 </td>
               </tr>
@@ -1597,50 +1602,28 @@ function Team() {
 function SettingsData() {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
-  const [syncStatus, setSyncStatus] = useState<string>("");
   if (user?.accessRole !== "Admin") return <Navigate to="/dashboard" replace />;
   return (
     <>
-      <PageTitle title="Settings" subtitle="Export, import, and reset local browser data." />
+      <PageTitle title="Settings" subtitle="Supabase is the source of truth for all app data." />
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          <Button icon={<Download size={16} />} onClick={() => downloadJson(`openlimits-export-${todayISO()}.json`, state.exportData())}>Export JSON</Button>
-          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium hover:bg-gray-50">
-            <Upload size={16} /> Import JSON
-            <input
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file || !confirm("Import will replace current local data. Continue?")) return;
-                state.importData(await readJsonFile(file));
-              }}
-            />
-          </label>
-          <Button tone="danger" icon={<RefreshCcw size={16} />} onClick={() => confirm("Reset all local data to seed?") && state.resetToSeed()}>
-            Reset to seed
-          </Button>
-          <Button
-            icon={<Upload size={16} />}
-            onClick={async () => {
-              try {
-                setSyncStatus("Syncing to Supabase...");
-                await pushLocalDataToSupabase(state.exportData());
-                setSyncStatus("Supabase sync complete.");
-              } catch (error) {
-                setSyncStatus(error instanceof Error ? error.message : "Supabase sync failed.");
-              }
-            }}
-            disabled={!isSupabaseConfigured}
-          >
-            Sync to Supabase
-          </Button>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md bg-gray-50 p-3">
+            <p className="text-xs font-semibold uppercase text-gray-500">Backend</p>
+            <p className="mt-1 font-semibold">{state.backendReady ? "Connected" : "Missing env vars"}</p>
+          </div>
+          <div className="rounded-md bg-gray-50 p-3">
+            <p className="text-xs font-semibold uppercase text-gray-500">Projects</p>
+            <p className="mono mt-1 text-xl font-semibold">{state.projects.length}</p>
+          </div>
+          <div className="rounded-md bg-gray-50 p-3">
+            <p className="text-xs font-semibold uppercase text-gray-500">Tasks</p>
+            <p className="mono mt-1 text-xl font-semibold">{state.tasks.length}</p>
+          </div>
         </div>
         <p className="mt-4 text-sm text-gray-500">
-          Data is stored in browser localStorage under the openlimits namespace. Supabase sync becomes available when environment variables and database schema are configured.
+          Local JSON import, local reset, and manual sync have been removed. Every create, edit, delete, comment, notification, and status update now writes directly to Supabase.
         </p>
-        {syncStatus ? <p className="mt-3 text-sm font-medium text-gray-700">{syncStatus}</p> : null}
       </section>
     </>
   );
