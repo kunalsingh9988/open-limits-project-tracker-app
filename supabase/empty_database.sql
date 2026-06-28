@@ -1,4 +1,5 @@
 truncate table
+  public.account_credentials,
   public.notifications,
   public.activity_log,
   public.comments,

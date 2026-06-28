@@ -1537,6 +1537,10 @@ function Team() {
   const [roleDraft, setRoleDraft] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountStatus, setAccountStatus] = useState<{ tone: "success" | "error" | "info"; message: string }>();
+  const [newPasswordVisible, setNewPasswordVisible] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
+  const [passwordSavingId, setPasswordSavingId] = useState<string>();
   if (user?.accessRole !== "Admin") return <Navigate to="/dashboard" replace />;
 
   async function handleAddAccount() {
@@ -1562,13 +1566,58 @@ function Team() {
     }
   }
 
+  async function handleSavePassword(account: Account) {
+    const nextPassword = passwordDrafts[account.id] ?? account.passwordHash;
+    if (!nextPassword?.trim()) {
+      setAccountStatus({ tone: "error", message: "Password is required." });
+      return;
+    }
+
+    setPasswordSavingId(account.id);
+    setAccountStatus({ tone: "info", message: `Updating password for ${account.username}...` });
+    try {
+      await state.resetAccountPassword(account.id, nextPassword);
+      setPasswordDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[account.id];
+        return next;
+      });
+      setAccountStatus({ tone: "success", message: `Updated password for ${account.username}.` });
+    } catch (error) {
+      setAccountStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not update password.",
+      });
+    } finally {
+      setPasswordSavingId(undefined);
+    }
+  }
+
   return (
     <>
       <PageTitle title="Team & Roles" subtitle="Admin-only account and job role management." />
       <section className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4">
         <Field label="Name"><input className={inputClass()} value={draft.name || ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
         <Field label="Username"><input className={inputClass()} value={draft.username || ""} onChange={(e) => setDraft({ ...draft, username: e.target.value })} /></Field>
-        <Field label="Password"><input className={inputClass()} type="password" value={draft.passwordHash || ""} onChange={(e) => setDraft({ ...draft, passwordHash: e.target.value })} /></Field>
+        <Field label="Password">
+          <div className="flex h-9 rounded-md border border-gray-200 bg-white focus-within:border-[var(--accent)]">
+            <input
+              className="min-w-0 flex-1 rounded-md bg-transparent px-3 text-sm text-gray-900 outline-none"
+              type={newPasswordVisible ? "text" : "password"}
+              value={draft.passwordHash || ""}
+              onChange={(e) => setDraft({ ...draft, passwordHash: e.target.value })}
+            />
+            <button
+              type="button"
+              title={newPasswordVisible ? "Hide password" : "Show password"}
+              aria-label={newPasswordVisible ? "Hide password" : "Show password"}
+              onClick={() => setNewPasswordVisible((value) => !value)}
+              className="inline-flex size-9 items-center justify-center text-gray-500 hover:text-gray-800"
+            >
+              {newPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </Field>
         <Field label="Job role">
           <select className={inputClass()} value={draft.jobRoleId || state.jobRoles[0]?.id} onChange={(e) => setDraft({ ...draft, jobRoleId: e.target.value, role: state.jobRoles.find((role) => role.id === e.target.value)?.name })}>
             {state.jobRoles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
@@ -1612,15 +1661,35 @@ function Team() {
         </div>
       </section>
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-        <table className="w-full min-w-[880px] text-left text-sm">
+        <table className="w-full min-w-[1080px] text-left text-sm">
           <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-            <tr><th className="px-3 py-3">Name</th><th className="px-3 py-3">Username</th><th className="px-3 py-3">Access</th><th className="px-3 py-3">Role</th><th className="px-3 py-3">Active</th><th className="px-3 py-3">Actions</th></tr>
+            <tr><th className="px-3 py-3">Name</th><th className="px-3 py-3">Username</th><th className="px-3 py-3">Password</th><th className="px-3 py-3">Access</th><th className="px-3 py-3">Role</th><th className="px-3 py-3">Active</th><th className="px-3 py-3">Actions</th></tr>
           </thead>
           <tbody>
             {state.accounts.map((account) => (
               <tr key={account.id} className="border-t border-gray-100">
                 <td className="px-3 py-3 font-medium">{account.name}</td>
                 <td className="mono px-3 py-3">{account.username}</td>
+                <td className="px-3 py-3">
+                  <div className="flex max-w-[260px] items-center gap-2">
+                    <input
+                      className={cn(inputClass(), "mono h-8 min-w-0 flex-1")}
+                      type={visiblePasswords[account.id] ? "text" : "password"}
+                      value={passwordDrafts[account.id] ?? account.passwordHash}
+                      placeholder="No saved password"
+                      onChange={(e) => setPasswordDrafts({ ...passwordDrafts, [account.id]: e.target.value })}
+                    />
+                    <IconButton
+                      label={visiblePasswords[account.id] ? "Hide password" : "Show password"}
+                      onClick={() => setVisiblePasswords({ ...visiblePasswords, [account.id]: !visiblePasswords[account.id] })}
+                    >
+                      {visiblePasswords[account.id] ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </IconButton>
+                    <IconButton label="Save password" tone="primary" onClick={() => handleSavePassword(account)}>
+                      {passwordSavingId === account.id ? <span className="text-xs">...</span> : <Check size={16} />}
+                    </IconButton>
+                  </div>
+                </td>
                 <td className="px-3 py-3">{account.accessRole}</td>
                 <td className="px-3 py-3">{account.role}</td>
                 <td className="px-3 py-3">

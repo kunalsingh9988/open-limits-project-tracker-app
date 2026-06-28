@@ -22,6 +22,12 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.account_credentials (
+  profile_id text primary key references public.profiles(id) on delete cascade,
+  password text not null default '',
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.projects (
   id text primary key,
   project_name text not null,
@@ -208,6 +214,7 @@ $$;
 
 alter table public.job_roles enable row level security;
 alter table public.profiles enable row level security;
+alter table public.account_credentials enable row level security;
 alter table public.projects enable row level security;
 alter table public.tasks enable row level security;
 alter table public.daily_client_updates enable row level security;
@@ -269,6 +276,17 @@ drop policy if exists "admins delete profiles" on public.profiles;
 create policy "admins delete profiles" on public.profiles
 for delete to authenticated
 using (public.is_admin());
+
+drop policy if exists "admins read account credentials" on public.account_credentials;
+create policy "admins read account credentials" on public.account_credentials
+for select to authenticated
+using (public.is_admin());
+
+drop policy if exists "admins manage account credentials" on public.account_credentials;
+create policy "admins manage account credentials" on public.account_credentials
+for all to authenticated
+using (public.is_admin())
+with check (public.is_admin());
 
 drop policy if exists "project scoped read" on public.projects;
 create policy "project scoped read" on public.projects
@@ -412,6 +430,7 @@ with check (public.is_admin());
 grant usage on schema public to anon, authenticated;
 grant select on public.job_roles to authenticated;
 grant select, insert, update, delete on public.profiles to authenticated;
+grant select, insert, update, delete on public.account_credentials to authenticated;
 grant select, insert, update, delete on public.projects to authenticated;
 grant select, insert, update, delete on public.tasks to authenticated;
 grant select, insert, update, delete on public.daily_client_updates to authenticated;
@@ -427,6 +446,7 @@ begin
   alter publication supabase_realtime add table
     public.job_roles,
     public.profiles,
+    public.account_credentials,
     public.projects,
     public.tasks,
     public.daily_client_updates,

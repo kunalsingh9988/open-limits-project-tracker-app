@@ -334,6 +334,23 @@ async function createAccountWithVercelApi(account: Account, password: string) {
   if (!response.ok || result.error) throw new Error(result.error || "Vercel account endpoint failed.");
 }
 
+async function updateAccountPasswordWithVercelApi(accountId: string, password: string) {
+  const { data } = await client().auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Admin session is missing. Log out and log in again.");
+
+  const response = await fetch("/api/update-password", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ accountId, password }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) throw new Error(result.error || "Vercel password endpoint failed.");
+}
+
 async function insertActivity(entry: Omit<ActivityLogEntry, "id" | "createdAt">) {
   await expectOk(
     client().from("activity_log").insert({
@@ -385,9 +402,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         ]);
       const { data: authData } = await supabase.auth.getUser();
       const sessionAccount = (accounts as any[]).find((account) => account.auth_user_id === authData.user?.id);
+      let credentials: any[] = [];
+      if (sessionAccount?.access_role === "Admin") {
+        const { data } = await supabase.from("account_credentials").select("*");
+        credentials = data || [];
+      }
+      const credentialMap = new Map((credentials as any[]).map((credential) => [credential.profile_id, credential.password]));
       set({
         jobRoles: (jobRoles as any[]).map((role) => ({ id: role.id, name: role.name })),
-        accounts: (accounts as any[]).map(profileFromRow),
+        accounts: (accounts as any[]).map(profileFromRow).map((account) => ({
+          ...account,
+          passwordHash: credentialMap.get(account.id) || "",
+        })),
         projects: (projects as any[]).map(projectFromRow),
         tasks: (tasks as any[]).map(taskFromRow),
         dailyUpdates: (dailyUpdates as any[]).map(updateFromRow),
@@ -793,8 +819,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadRemoteData();
   },
 
-  async resetAccountPassword() {
-    throw new Error("Use Supabase Auth dashboard to reset passwords, or create a new password reset function.");
+  async resetAccountPassword(id, password) {
+    const state = get();
+    requireAdmin(state);
+    if (!password.trim()) throw new Error("Password is required.");
+    await updateAccountPasswordWithVercelApi(id, password);
+    await insertActivity({ entityType: "account", entityId: id, actorId: actor(state)!.id, action: "Updated password" });
+    await get().loadRemoteData();
   },
 
   async upsertJobRole(role) {

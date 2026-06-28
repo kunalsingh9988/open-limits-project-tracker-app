@@ -12,6 +12,12 @@ Paste and run the full contents of:
 supabase/schema.sql
 ```
 
+If your database already exists and you only need admin-visible saved passwords, run this smaller update instead:
+
+```txt
+supabase/add_account_credentials.sql
+```
+
 ## 2. Clear old app data
 
 If you want the app to start completely empty, run this after the schema:

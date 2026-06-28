@@ -6,11 +6,6 @@ const json = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
-const authEmail = (username) => {
-  const clean = String(username || "").trim().toLowerCase();
-  return clean.includes("@") ? clean : `${clean}@openlimits.local`;
-};
-
 const env = (...names) => names.map((name) => process.env[name]).find(Boolean);
 
 export default async function handler(req, res) {
@@ -50,54 +45,34 @@ export default async function handler(req, res) {
       .eq("auth_user_id", authUser.user.id)
       .single();
     if (callerError || caller?.access_role !== "Admin" || !caller.active) {
-      throw new Error("Only active admins can create users.");
+      throw new Error("Only active admins can update passwords.");
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
-    if (!body.name || !body.username || !body.password) {
-      throw new Error("Name, username, and password are required.");
+    if (!body.accountId || !body.password) {
+      throw new Error("Account and password are required.");
     }
 
-    const username = String(body.username).trim().toLowerCase();
-    const { data: created, error: createError } = await adminClient.auth.admin.createUser({
-      email: authEmail(username),
+    const { data: profile, error: profileError } = await adminClient
+      .from("profiles")
+      .select("id, auth_user_id")
+      .eq("id", body.accountId)
+      .single();
+    if (profileError || !profile?.auth_user_id) throw new Error("Account is not linked to a Supabase Auth user.");
+
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(profile.auth_user_id, {
       password: body.password,
-      email_confirm: true,
-      user_metadata: {
-        username,
-        display_name: body.name,
-      },
     });
-    if (createError) throw createError;
-
-    const profile = {
-      id: body.id,
-      auth_user_id: created.user.id,
-      display_name: String(body.name).trim(),
-      username,
-      access_role: body.accessRole || "Employee",
-      job_role_id: body.jobRoleId || null,
-      role: body.role || "Team Member",
-      color_tag: body.colorTag || "#5B5FEF",
-      active: body.active ?? true,
-      created_at: new Date().toISOString(),
-    };
-
-    const { error: profileError } = await adminClient.from("profiles").upsert(profile);
-    if (profileError) throw profileError;
+    if (updateError) throw updateError;
 
     const { error: credentialError } = await adminClient.from("account_credentials").upsert({
-      profile_id: profile.id,
+      profile_id: body.accountId,
       password: body.password,
       updated_at: new Date().toISOString(),
     });
-    if (credentialError) {
-      await adminClient.from("profiles").delete().eq("id", profile.id);
-      await adminClient.auth.admin.deleteUser(created.user.id);
-      throw credentialError;
-    }
+    if (credentialError) throw credentialError;
 
-    return json(res, 200, { profile });
+    return json(res, 200, { ok: true });
   } catch (error) {
     return json(res, 400, { error: error instanceof Error ? error.message : "Unknown error." });
   }
