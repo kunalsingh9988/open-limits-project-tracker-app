@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
-import { supabase, isSupabaseConfigured, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import type {
   Account,
   ActivityLogEntry,
@@ -303,53 +303,40 @@ const profileRow = (account: Account) => ({
   created_at: account.createdAt,
 });
 
-async function createAccountWithBrowserAuth(account: Account, password: string, authProfileId: string) {
-  if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase environment variables are missing.");
-
-  const signupClient = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-
-  const { data, error } = await signupClient.auth.signUp({
-    email: authEmail(account.username),
+function accountPayload(account: Account, password: string) {
+  return {
+    id: account.id,
+    name: account.name,
+    username: account.username,
     password,
-    options: {
-      data: {
-        username: account.username,
-        display_name: account.name,
-      },
-    },
-  });
-  if (error) throw error;
-
-  const authUserId = data.user?.id;
-  if (!authUserId) {
-    throw new Error("Supabase Auth did not return the new user. Check that email confirmation is turned off, or deploy the create-user function.");
-  }
-
-  await expectOk(client().from("profiles").upsert({
-    ...profileRow(account),
-    id: authProfileId,
-    auth_user_id: authUserId,
-  }).select());
+    accessRole: account.accessRole,
+    jobRoleId: account.jobRoleId || null,
+    role: account.role,
+    colorTag: account.colorTag,
+    active: account.active,
+  };
 }
 
-async function createAccountWithFunction(account: Account, password: string) {
-  const { data, error } = await client().functions.invoke("create-user", {
-    body: {
-      id: account.id,
-      name: account.name,
-      username: account.username,
-      password,
-      accessRole: account.accessRole,
-      jobRoleId: account.jobRoleId || null,
-      role: account.role,
-      colorTag: account.colorTag,
-      active: account.active,
+async function createAccountWithVercelApi(account: Account, password: string) {
+  const { data } = await client().auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Admin session is missing. Log out and log in again.");
+
+  const response = await fetch("/api/create-user", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
+    body: JSON.stringify(accountPayload(account, password)),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) throw new Error(result.error || "Vercel account endpoint failed.");
+}
+
+async function createAccountWithEdgeFunction(account: Account, password: string) {
+  const { data, error } = await client().functions.invoke("create-user", {
+    body: accountPayload(account, password),
   });
   if (error) throw new Error(error.message);
   if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
@@ -784,14 +771,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
 
       try {
-        await createAccountWithFunction(item, account.passwordHash);
-      } catch (functionError) {
+        await createAccountWithVercelApi(item, account.passwordHash);
+      } catch (apiError) {
         try {
-          await createAccountWithBrowserAuth(item, account.passwordHash, id);
-        } catch (fallbackError) {
-          const firstMessage = functionError instanceof Error ? functionError.message : "create-user function failed";
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "browser signup failed";
-          throw new Error(`Could not create account. Function: ${firstMessage}. Browser signup: ${fallbackMessage}`);
+          await createAccountWithEdgeFunction(item, account.passwordHash);
+        } catch (edgeError) {
+          const apiMessage = apiError instanceof Error ? apiError.message : "Vercel API failed";
+          const edgeMessage = edgeError instanceof Error ? edgeError.message : "Supabase Edge Function failed";
+          throw new Error(`Could not create account. Server API: ${apiMessage}. Edge Function: ${edgeMessage}`);
         }
       }
 

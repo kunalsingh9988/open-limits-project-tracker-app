@@ -31,9 +31,12 @@ Add:
 ```bash
 VITE_SUPABASE_URL=https://ltyqshfaiodglkvcebkw.supabase.co
 VITE_SUPABASE_ANON_KEY=<your publishable or anon key>
+SUPABASE_SERVICE_ROLE_KEY=<your service role key>
 ```
 
 Apply to Production, Preview, and Development, then redeploy.
+
+Only the `VITE_` values are sent to the browser. `SUPABASE_SERVICE_ROLE_KEY` is used by the Vercel server endpoint that lets admins create employee accounts.
 
 ## 4. Create the first admin
 
@@ -55,9 +58,11 @@ ID: admin
 Password: admin123
 ```
 
-## 5. Deploy the user creation function
+## 5. User creation backend
 
-Admin creates employee IDs/passwords from the app through a Supabase Edge Function.
+Admin creates employee IDs/passwords from the app through `/api/create-user`, a Vercel server endpoint. This needs `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
+
+The Supabase Edge Function is optional backup infrastructure. If you want to deploy it too:
 
 Deploy:
 
