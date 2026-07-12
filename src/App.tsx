@@ -199,6 +199,40 @@ function Pill({ children, className }: { children: ReactNode; className?: string
   );
 }
 
+type ActionStatus = { tone: "success" | "error" | "info"; message: string };
+
+function ActionNotice({ status }: { status?: ActionStatus }) {
+  if (!status) return null;
+  return (
+    <div className={cn(
+      "rounded-md px-3 py-2 text-sm",
+      status.tone === "success" && "border border-emerald-200 bg-emerald-50 text-emerald-800",
+      status.tone === "error" && "border border-red-200 bg-red-50 text-red-800",
+      status.tone === "info" && "border border-blue-200 bg-blue-50 text-blue-800",
+    )}>
+      {status.message}
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+      <p className="font-semibold text-gray-800">{title}</p>
+      {detail ? <p className="mx-auto mt-1 max-w-xl leading-6">{detail}</p> : null}
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
+    </div>
+  );
+}
+
 function Login() {
   const login = useAppStore((state) => state.login);
   const bootstrapFirstAdmin = useAppStore((state) => state.bootstrapFirstAdmin);
@@ -333,6 +367,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [nextPassword, setNextPassword] = useState("");
+  const [shellStatus, setShellStatus] = useState<ActionStatus>();
   const unread = state.notifications.filter(
     (notification) => notification.recipientId === user?.id && !notification.read,
   ).length;
@@ -457,9 +492,15 @@ function Shell({ children }: { children: ReactNode }) {
             onSubmit={async (event) => {
               event.preventDefault();
               if (nextPassword.length < 6) return;
-              await state.changePassword(user.id, nextPassword);
-              setNextPassword("");
-              setPasswordOpen(false);
+              setShellStatus({ tone: "info", message: "Updating password..." });
+              try {
+                await state.changePassword(user.id, nextPassword);
+                setNextPassword("");
+                setPasswordOpen(false);
+                setShellStatus({ tone: "success", message: "Password updated." });
+              } catch (error) {
+                setShellStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not update password." });
+              }
             }}
             className="flex flex-wrap items-end gap-2 border-t border-gray-100 px-4 py-3 lg:px-6"
           >
@@ -477,6 +518,7 @@ function Shell({ children }: { children: ReactNode }) {
             </Button>
           </form>
         ) : null}
+        {shellStatus ? <div className="border-t border-gray-100 px-4 py-3 lg:px-6"><ActionNotice status={shellStatus} /></div> : null}
       </header>
 
       <main className="lg:ml-64">
@@ -529,6 +571,9 @@ function Dashboard() {
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const projects = scopedProjects(state.projects, user);
   const tasks = scopedTasks(state.tasks, user, state.projects);
+  const [quickProjectId, setQuickProjectId] = useState("");
+  const [quickUpdate, setQuickUpdate] = useState({ done: "", blockers: "", next: "", video: "" });
+  const [dashboardStatus, setDashboardStatus] = useState<ActionStatus>();
   const today = todayISO();
   const activeProjects = projects.filter((project) => !["Delivered", "Cancelled"].includes(project.status));
   const overdueTasks = tasks.filter((task) => isOverdue(task.deadline, taskDone(task)));
@@ -555,6 +600,66 @@ function Dashboard() {
       slot.date === today &&
       (user?.accessRole === "Admin" || slot.teamMemberId === user?.id),
   );
+  const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
+  const updateCoverage = activeProjects.length ? Math.round(((activeProjects.length - noUpdateToday.length) / activeProjects.length) * 100) : 100;
+  const workloadRows = employees.map((person) => {
+    const personTasks = state.tasks.filter((task) => task.personId === person.id && !taskDone(task));
+    const personProjects = state.projects.filter((project) => [project.mainDeveloperId, project.developer2Id, project.designerId].includes(person.id) && !projectDone(project));
+    return {
+      person,
+      tasks: personTasks.length,
+      dueToday: personTasks.filter((task) => task.deadline === today).length,
+      overdue: personTasks.filter((task) => isOverdue(task.deadline, taskDone(task))).length,
+      projects: personProjects.length,
+    };
+  }).sort((a, b) => b.overdue - a.overdue || b.tasks - a.tasks);
+  const employeeUpdateProjects = user?.accessRole === "Employee" ? activeProjects : [];
+  const selectedQuickProjectId = quickProjectId || employeeUpdateProjects[0]?.id || "";
+  const selectedQuickProject = employeeUpdateProjects.find((project) => project.id === selectedQuickProjectId);
+  const quickExisting = state.dailyUpdates.find((update) => update.projectId === selectedQuickProjectId && update.date === today);
+
+  async function saveQuickUpdate() {
+    if (!selectedQuickProjectId) return;
+    setDashboardStatus({ tone: "info", message: "Saving today update..." });
+    try {
+      await state.upsertUpdate({
+        ...quickExisting,
+        projectId: selectedQuickProjectId,
+        date: today,
+        morningUpdate: [
+          quickUpdate.done ? `Done: ${quickUpdate.done}` : "",
+          quickUpdate.blockers ? `Blockers: ${quickUpdate.blockers}` : "",
+          quickUpdate.next ? `Next: ${quickUpdate.next}` : "",
+        ].filter(Boolean).join("\n"),
+        eveningUpdate: quickExisting?.eveningUpdate || "",
+        videoRecordingLink: quickUpdate.video || quickExisting?.videoRecordingLink || "",
+      });
+      setQuickUpdate({ done: "", blockers: "", next: "", video: "" });
+      setDashboardStatus({ tone: "success", message: `Saved update for ${selectedQuickProject?.projectName || "project"}.` });
+    } catch (error) {
+      setDashboardStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save update." });
+    }
+  }
+
+  function copyWeeklyReport() {
+    const lines = [
+      "Open Limits Weekly Project Report",
+      `Generated: ${format(new Date(), "MMM d, yyyy h:mm a")}`,
+      "",
+      `Active projects: ${activeProjects.length}`,
+      `At risk: ${atRisk.length}`,
+      `Overdue tasks: ${overdueTasks.length}`,
+      `Missing updates today: ${noUpdateToday.length}`,
+      "",
+      "Needs attention:",
+      ...atRisk.slice(0, 10).map((project) => `- ${project.projectName}: ${project.delayBlocker || project.status || "Review needed"}`),
+      "",
+      "Workload:",
+      ...workloadRows.map((row) => `- ${row.person.name}: ${row.projects} projects, ${row.tasks} open tasks, ${row.overdue} overdue`),
+    ];
+    void copyText(lines.join("\n"));
+    setDashboardStatus({ tone: "success", message: "Weekly report copied." });
+  }
 
   const stats = [
     ["Due today", dueToday.length, CalendarDays],
@@ -569,8 +674,10 @@ function Dashboard() {
     <>
       <PageTitle
         title={user?.accessRole === "Admin" ? "Dashboard" : "My Work"}
-        subtitle="Live local view of deadlines, updates, tasks, and calendar load."
+        subtitle={user?.accessRole === "Admin" ? "Command center for project health, updates, and team workload." : "Your daily tasks, deadlines, plans, and project update form."}
+        action={user?.accessRole === "Admin" ? <Button icon={<Copy size={16} />} onClick={copyWeeklyReport}>Copy weekly report</Button> : null}
       />
+      <div className="mb-4"><ActionNotice status={dashboardStatus} /></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {stats.map(([label, value, Icon]) => (
           <div key={label} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -583,6 +690,45 @@ function Dashboard() {
         ))}
       </div>
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        {user?.accessRole === "Employee" ? (
+          <section className="rounded-lg border border-blue-200 bg-white p-4 shadow-sm xl:col-span-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold">Today Update</h2>
+                <p className="text-sm text-gray-500">Send your progress, blockers, and next step without opening a long form.</p>
+              </div>
+              {quickExisting ? <Pill className="bg-emerald-100 text-emerald-800"><Check size={12} /> Submitted today</Pill> : <Pill className="bg-amber-100 text-amber-800">Pending today</Pill>}
+            </div>
+            {employeeUpdateProjects.length ? (
+              <div className="grid gap-3 md:grid-cols-4">
+                <Field label="Project">
+                  <select className={inputClass()} value={selectedQuickProjectId} onChange={(event) => setQuickProjectId(event.target.value)}>
+                    {employeeUpdateProjects.map((project) => <option key={project.id} value={project.id}>{project.projectName}</option>)}
+                  </select>
+                </Field>
+                <Field label="What got done">
+                  <input className={inputClass()} value={quickUpdate.done} onChange={(event) => setQuickUpdate({ ...quickUpdate, done: event.target.value })} />
+                </Field>
+                <Field label="Blocker">
+                  <input className={inputClass()} value={quickUpdate.blockers} onChange={(event) => setQuickUpdate({ ...quickUpdate, blockers: event.target.value })} />
+                </Field>
+                <Field label="Next step">
+                  <input className={inputClass()} value={quickUpdate.next} onChange={(event) => setQuickUpdate({ ...quickUpdate, next: event.target.value })} />
+                </Field>
+                <Field label="Video / proof link">
+                  <input className={inputClass()} value={quickUpdate.video} onChange={(event) => setQuickUpdate({ ...quickUpdate, video: event.target.value })} />
+                </Field>
+                <div className="flex items-end md:col-span-3">
+                  <Button tone="primary" icon={<Check size={16} />} onClick={saveQuickUpdate} disabled={!quickUpdate.done && !quickUpdate.blockers && !quickUpdate.next && !quickUpdate.video}>
+                    Save today update
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <EmptyState title="No active assigned projects" detail="Once an admin assigns you to a project, your quick daily update form will appear here." />
+            )}
+          </section>
+        ) : null}
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="mb-3 font-semibold">Today Rail</h2>
           <div className="grid gap-2">
@@ -623,6 +769,45 @@ function Dashboard() {
             {!atRisk.length ? <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">No at-risk projects.</p> : null}
           </div>
         </section>
+        {user?.accessRole === "Admin" ? (
+          <>
+            <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-semibold">Daily Update Coverage</h2>
+                <Pill className={updateCoverage >= 80 ? "bg-emerald-100 text-emerald-800" : updateCoverage >= 50 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"}>{updateCoverage}%</Pill>
+              </div>
+              <div className="h-2 rounded-full bg-gray-100">
+                <div className={cn("h-2 rounded-full", updateCoverage >= 80 ? "bg-emerald-500" : updateCoverage >= 50 ? "bg-amber-500" : "bg-red-500")} style={{ width: `${updateCoverage}%` }} />
+              </div>
+              <div className="mt-3 grid gap-2">
+                {noUpdateToday.slice(0, 6).map((project) => (
+                  <NavLink key={project.id} to="/updates" className="flex items-center justify-between rounded-md bg-gray-50 p-3 text-sm hover:bg-gray-100">
+                    <span className="font-medium">{project.projectName}</span>
+                    <span className="text-xs text-gray-500">{personName(state.accounts, project.mainDeveloperId || project.designerId)}</span>
+                  </NavLink>
+                ))}
+                {!noUpdateToday.length ? <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">All active projects have an update today.</p> : null}
+              </div>
+            </section>
+            <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 font-semibold">Team Workload</h2>
+              <div className="grid gap-2">
+                {workloadRows.slice(0, 8).map((row) => (
+                  <div key={row.person.id} className="rounded-md bg-gray-50 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{row.person.name}</span>
+                      <Pill className={row.overdue ? "bg-red-100 text-red-800" : row.tasks > 6 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>
+                        {row.overdue ? `${row.overdue} overdue` : `${row.tasks} open`}
+                      </Pill>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">{row.projects} active projects · {row.dueToday} due today</p>
+                  </div>
+                ))}
+                {!workloadRows.length ? <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">No active employees yet.</p> : null}
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
     </>
   );
@@ -636,15 +821,27 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
   const state = useAppStore();
   const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
   const [project, setProject] = useState<Partial<Project>>({ status: "Not Started", isPriority: false });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<ActionStatus>();
   return (
     <form
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        state.createProject(project);
-        onClose();
+        setSaving(true);
+        setStatus({ tone: "info", message: "Creating project..." });
+        try {
+          await state.createProject(project);
+          setStatus({ tone: "success", message: "Project created." });
+          onClose();
+        } catch (error) {
+          setStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not create project." });
+        } finally {
+          setSaving(false);
+        }
       }}
       className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-3"
     >
+      <div className="md:col-span-3"><ActionNotice status={status} /></div>
       <Field label="Project">
         <input className={inputClass()} required onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
       </Field>
@@ -675,8 +872,17 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         <input type="checkbox" onChange={(e) => setProject({ ...project, isPriority: e.target.checked })} />
         Priority
       </label>
+      <Field label="Preview link">
+        <input className={inputClass()} onChange={(e) => setProject({ ...project, previewLink: e.target.value })} />
+      </Field>
+      <Field label="Figma link">
+        <input className={inputClass()} onChange={(e) => setProject({ ...project, figmaLink: e.target.value })} />
+      </Field>
+      <Field label="Drive assets">
+        <input className={inputClass()} onChange={(e) => setProject({ ...project, driveAssetsLink: e.target.value })} />
+      </Field>
       <div className="flex items-end gap-2 md:col-span-2">
-        <Button type="submit" tone="primary" icon={<Plus size={16} />}>Add project</Button>
+        <Button type="submit" tone="primary" icon={<Plus size={16} />} disabled={saving}>{saving ? "Adding..." : "Add project"}</Button>
         <Button onClick={onClose}>Cancel</Button>
       </div>
     </form>
@@ -790,6 +996,8 @@ function Projects() {
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const isAdmin = user?.accessRole === "Admin";
   const [showAdd, setShowAdd] = useState(false);
+  const [query, setQuery] = useState("");
+  const [projectStatus, setProjectStatus] = useState<ActionStatus>();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeFilter = (searchParams.get("filter") as ProjectFilter) || "all";
   const baseProjects = scopedProjects(state.projects, user);
@@ -804,6 +1012,9 @@ function Projects() {
       return !project.mainDeveloperId && !project.developer2Id && !project.designerId;
     }
     return true;
+  }).filter((project) => {
+    const haystack = `${project.projectName} ${project.clientUsername} ${project.status} ${project.tags.join(" ")}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
   });
   const filters: Array<{ id: ProjectFilter; label: string; count: number; icon: ReactNode }> = [
     { id: "all", label: "All", count: baseProjects.length, icon: <ClipboardList size={15} /> },
@@ -816,11 +1027,24 @@ function Projects() {
     { id: "unassigned", label: "Not assigned", count: baseProjects.filter((project) => !project.mainDeveloperId && !project.developer2Id && !project.designerId).length, icon: <Users size={15} /> },
   ];
 
-  function patchProject(project: Project, patch: Partial<Project>) {
+  async function patchProject(project: Project, patch: Partial<Project>) {
+    setProjectStatus({ tone: "info", message: "Saving project..." });
     try {
-      state.updateProject(project.id, patch);
+      await state.updateProject(project.id, patch);
+      setProjectStatus({ tone: "success", message: "Project saved." });
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not update project.");
+      setProjectStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not update project." });
+    }
+  }
+
+  async function deleteProject(project: Project) {
+    if (!confirm(`Delete "${project.projectName}"? This cannot be undone.`)) return;
+    setProjectStatus({ tone: "info", message: "Deleting project..." });
+    try {
+      await state.deleteProject(project.id);
+      setProjectStatus({ tone: "success", message: "Project deleted." });
+    } catch (error) {
+      setProjectStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not delete project." });
     }
   }
 
@@ -840,6 +1064,11 @@ function Projects() {
         }
       />
       {showAdd ? <AddProjectForm onClose={() => setShowAdd(false)} /> : null}
+      <div className="mb-4"><ActionNotice status={projectStatus} /></div>
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+        <Search size={16} className="text-gray-400" />
+        <input className="h-9 flex-1 bg-transparent text-sm outline-none" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search project, client, status, or tag" />
+      </div>
       <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
         {filters.map((filter) => (
           <button
@@ -861,15 +1090,17 @@ function Projects() {
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {projects
-          .sort((a, b) => Number(b.isPriority) - Number(a.isPriority))
+          .sort((a, b) => Number(b.isPriority) - Number(a.isPriority) || Number(isOverdue(b.deadline, projectDone(b))) - Number(isOverdue(a.deadline, projectDone(a))) || (daysLeft(a.deadline) ?? 9999) - (daysLeft(b.deadline) ?? 9999))
           .map((project) => (
-            <ProjectCard key={project.id} project={project} onPatch={patchProject} />
+            <ProjectCard key={project.id} project={project} onPatch={patchProject} onDelete={deleteProject} />
           ))}
       </div>
       {!projects.length ? (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
-          No projects match this filter.
-        </div>
+        <EmptyState
+          title="No projects found"
+          detail={isAdmin ? "Create a project, assign at least one owner, add a deadline, and checklist items so progress and risk can be tracked." : "No assigned projects match this filter yet."}
+          action={isAdmin ? <Button tone="primary" icon={<Plus size={16} />} onClick={() => setShowAdd(true)}>Add Project</Button> : null}
+        />
       ) : null}
     </>
   );
@@ -878,9 +1109,11 @@ function Projects() {
 function ProjectCard({
   project,
   onPatch,
+  onDelete,
 }: {
   project: Project;
-  onPatch: (project: Project, patch: Partial<Project>) => void;
+  onPatch: (project: Project, patch: Partial<Project>) => void | Promise<void>;
+  onDelete: (project: Project) => void | Promise<void>;
 }) {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
@@ -904,7 +1137,7 @@ function ProjectCard({
           <p className="mt-1 text-sm text-gray-500">@{project.clientUsername || "client"}</p>
         </div>
         {isAdmin ? (
-          <IconButton label="Delete project" tone="danger" onClick={() => confirm("Delete this project?") && state.deleteProject(project.id)}>
+          <IconButton label="Delete project" tone="danger" onClick={() => onDelete(project)}>
             <Trash2 size={16} />
           </IconButton>
         ) : null}
@@ -978,6 +1211,10 @@ function ProjectCard({
             <select className={inputClass()} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
               {PROJECT_STATUSES.map((status) => <option key={status}>{status}</option>)}
             </select>
+            <input className={inputClass()} value={project.previewLink || ""} onChange={(e) => onPatch(project, { previewLink: e.target.value })} placeholder="Preview link" />
+            <input className={inputClass()} value={project.figmaLink || ""} onChange={(e) => onPatch(project, { figmaLink: e.target.value })} placeholder="Figma link" />
+            <input className={inputClass()} value={project.driveAssetsLink || ""} onChange={(e) => onPatch(project, { driveAssetsLink: e.target.value })} placeholder="Drive assets link" />
+            <input className={inputClass()} value={project.briefDocLink || ""} onChange={(e) => onPatch(project, { briefDocLink: e.target.value })} placeholder="Brief doc link" />
           </div>
         ) : (
           <select className={inputClass()} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
@@ -998,6 +1235,8 @@ function ProjectCard({
       <div className="mt-4 flex flex-wrap gap-2">
         {project.previewLink ? <a className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700" href={project.previewLink} target="_blank"><LinkIcon size={14} /> Preview</a> : null}
         {project.figmaLink ? <a className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700" href={project.figmaLink} target="_blank"><LinkIcon size={14} /> Figma</a> : null}
+        {project.driveAssetsLink ? <a className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700" href={project.driveAssetsLink} target="_blank"><LinkIcon size={14} /> Assets</a> : null}
+        {project.briefDocLink ? <a className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700" href={project.briefDocLink} target="_blank"><LinkIcon size={14} /> Brief</a> : null}
       </div>
 
       <div className="mt-auto pt-3">
@@ -1011,15 +1250,27 @@ function AddTaskForm({ onClose }: { onClose: () => void }) {
   const state = useAppStore();
   const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
   const [task, setTask] = useState<Partial<Task>>({ priority: "Medium", status: "To Do", personId: employees[0]?.id });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<ActionStatus>();
   return (
     <form
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        state.createTask(task);
-        onClose();
+        setSaving(true);
+        setStatus({ tone: "info", message: "Creating task..." });
+        try {
+          await state.createTask(task);
+          setStatus({ tone: "success", message: "Task created." });
+          onClose();
+        } catch (error) {
+          setStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not create task." });
+        } finally {
+          setSaving(false);
+        }
       }}
       className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-3"
     >
+      <div className="md:col-span-3"><ActionNotice status={status} /></div>
       <Field label="Task">
         <input className={inputClass()} required onChange={(e) => setTask({ ...task, taskDescription: e.target.value })} />
       </Field>
@@ -1046,7 +1297,7 @@ function AddTaskForm({ onClose }: { onClose: () => void }) {
         </select>
       </Field>
       <div className="flex items-end gap-2 md:col-span-3">
-        <Button type="submit" tone="primary" icon={<Plus size={16} />}>Add task</Button>
+        <Button type="submit" tone="primary" icon={<Plus size={16} />} disabled={saving}>{saving ? "Adding..." : "Add task"}</Button>
         <Button onClick={onClose}>Cancel</Button>
       </div>
     </form>
@@ -1058,15 +1309,31 @@ function Tasks() {
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const isAdmin = user?.accessRole === "Admin";
   const [showAdd, setShowAdd] = useState(false);
-  const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus | "overdue">("all");
+  const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus | "overdue" | "today" | "soon">("all");
+  const [query, setQuery] = useState("");
+  const [taskStatus, setTaskStatus] = useState<ActionStatus>();
   const tasks = scopedTasks(state.tasks, user, state.projects);
   const visibleTasks = tasks.filter((task) => {
     if (taskFilter === "all") return true;
     if (taskFilter === "overdue") return isOverdue(task.deadline, taskDone(task));
+    if (taskFilter === "today") return task.deadline === todayISO() && !taskDone(task);
+    if (taskFilter === "soon") {
+      const left = daysLeft(task.deadline);
+      return left !== undefined && left >= 0 && left <= 3 && !taskDone(task);
+    }
     return task.status === taskFilter;
+  }).filter((task) => {
+    const project = state.projects.find((item) => item.id === task.projectId);
+    const owner = personName(state.accounts, task.personId);
+    return `${task.taskDescription} ${task.clientOrStore} ${project?.projectName || ""} ${owner} ${task.status}`.toLowerCase().includes(query.toLowerCase());
   });
-  const filterOptions: Array<{ id: "all" | TaskStatus | "overdue"; label: string; count: number }> = [
+  const filterOptions: Array<{ id: "all" | TaskStatus | "overdue" | "today" | "soon"; label: string; count: number }> = [
     { id: "all", label: "All", count: tasks.length },
+    { id: "today", label: "Due today", count: tasks.filter((task) => task.deadline === todayISO() && !taskDone(task)).length },
+    { id: "soon", label: "Due soon", count: tasks.filter((task) => {
+      const left = daysLeft(task.deadline);
+      return left !== undefined && left >= 0 && left <= 3 && !taskDone(task);
+    }).length },
     { id: "overdue", label: "Overdue", count: tasks.filter((task) => isOverdue(task.deadline, taskDone(task))).length },
     ...TASK_STATUSES.map((status) => ({
       id: status,
@@ -1075,11 +1342,24 @@ function Tasks() {
     })),
   ];
 
-  function patchTask(task: Task, patch: Partial<Task>) {
+  async function patchTask(task: Task, patch: Partial<Task>) {
+    setTaskStatus({ tone: "info", message: "Saving task..." });
     try {
-      state.updateTask(task.id, patch);
+      await state.updateTask(task.id, patch);
+      setTaskStatus({ tone: "success", message: "Task saved." });
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not update task.");
+      setTaskStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not update task." });
+    }
+  }
+
+  async function deleteTask(task: Task) {
+    if (!confirm(`Delete "${task.taskDescription}"? This cannot be undone.`)) return;
+    setTaskStatus({ tone: "info", message: "Deleting task..." });
+    try {
+      await state.deleteTask(task.id);
+      setTaskStatus({ tone: "success", message: "Task deleted." });
+    } catch (error) {
+      setTaskStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not delete task." });
     }
   }
 
@@ -1095,6 +1375,11 @@ function Tasks() {
         }
       />
       {showAdd ? <AddTaskForm onClose={() => setShowAdd(false)} /> : null}
+      <div className="mb-4"><ActionNotice status={taskStatus} /></div>
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+        <Search size={16} className="text-gray-400" />
+        <input className="h-9 flex-1 bg-transparent text-sm outline-none" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search task, project, owner, or status" />
+      </div>
       <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
         {filterOptions.map((filter) => (
           <button
@@ -1114,20 +1399,24 @@ function Tasks() {
         ))}
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {visibleTasks.map((task) => (
-          <TaskCard key={task.id} task={task} onPatch={patchTask} />
+        {visibleTasks
+          .sort((a, b) => Number(isOverdue(b.deadline, taskDone(b))) - Number(isOverdue(a.deadline, taskDone(a))) || (b.priority === "High" ? 2 : b.priority === "Medium" ? 1 : 0) - (a.priority === "High" ? 2 : a.priority === "Medium" ? 1 : 0) || (daysLeft(a.deadline) ?? 9999) - (daysLeft(b.deadline) ?? 9999))
+          .map((task) => (
+          <TaskCard key={task.id} task={task} onPatch={patchTask} onDelete={deleteTask} />
         ))}
       </div>
       {!visibleTasks.length ? (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
-          No tasks match this filter.
-        </div>
+        <EmptyState
+          title="No tasks found"
+          detail={isAdmin ? "Create tasks with owners, project links, deadlines, and checklists so work is trackable." : "You have no matching work here. Try All, or ask admin to assign a task/project."}
+          action={isAdmin ? <Button tone="primary" icon={<Plus size={16} />} onClick={() => setShowAdd(true)}>Add Task</Button> : null}
+        />
       ) : null}
     </>
   );
 }
 
-function TaskCard({ task, onPatch }: { task: Task; onPatch: (task: Task, patch: Partial<Task>) => void }) {
+function TaskCard({ task, onPatch, onDelete }: { task: Task; onPatch: (task: Task, patch: Partial<Task>) => void | Promise<void>; onDelete: (task: Task) => void | Promise<void> }) {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const isAdmin = user?.accessRole === "Admin";
@@ -1188,7 +1477,7 @@ function TaskCard({ task, onPatch }: { task: Task; onPatch: (task: Task, patch: 
         <CommentsPanel entityType="task" entityId={task.id} />
         {isAdmin ? (
           <div className="mt-3 flex justify-end">
-            <IconButton label="Delete task" tone="danger" onClick={() => confirm("Delete this task?") && state.deleteTask(task.id)}>
+            <IconButton label="Delete task" tone="danger" onClick={() => onDelete(task)}>
               <Trash2 size={16} />
             </IconButton>
           </div>
@@ -1204,18 +1493,38 @@ function Updates() {
   const projects = scopedProjects(state.projects, user).filter((project) => project.status !== "Delivered");
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [date, setDate] = useState(todayISO());
+  const [updateStatus, setUpdateStatus] = useState<ActionStatus>();
   const existing = state.dailyUpdates.find((update) => update.projectId === projectId && update.date === date);
   const [draft, setDraft] = useState<Partial<DailyClientUpdate>>({});
   const current = { ...existing, ...draft };
   const formatted = `Morning Update:\n${current.morningUpdate || ""}\n\nEvening Update:\n${current.eveningUpdate || ""}\n\nVideo Recording:\n${current.videoRecordingLink || ""}`;
+  const activeProjects = projects.filter((project) => !["Cancelled", "Delivered"].includes(project.status));
+  const missingToday = activeProjects.filter((project) => !state.dailyUpdates.some((update) => update.projectId === project.id && update.date === todayISO()));
+
+  async function saveUpdate() {
+    if (!projectId) return;
+    setUpdateStatus({ tone: "info", message: "Saving update..." });
+    try {
+      await state.upsertUpdate({ ...existing, ...draft, projectId, date });
+      setDraft({});
+      setUpdateStatus({ tone: "success", message: "Daily update saved." });
+    } catch (error) {
+      setUpdateStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save update." });
+    }
+  }
 
   return (
     <>
       <PageTitle title="Daily Updates" subtitle="Log client-facing morning, evening, and video updates per project." />
+      <div className="mb-4"><ActionNotice status={updateStatus} /></div>
+      {projects.length ? null : (
+        <EmptyState title="No active projects for updates" detail="Updates appear here after projects are created and assigned." />
+      )}
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Project">
             <select className={inputClass()} value={projectId} onChange={(e) => { setProjectId(e.target.value); setDraft({}); }}>
+              {!projects.length ? <option value="">No project available</option> : null}
               {projects.map((project) => <option key={project.id} value={project.id}>{project.projectName}</option>)}
             </select>
           </Field>
@@ -1226,7 +1535,7 @@ function Updates() {
             <Button icon={<MessageSquare size={16} />} onClick={() => setDraft({ ...draft, morningUpdate: UPDATE_TEMPLATE })}>
               Template
             </Button>
-            <Button icon={<Copy size={16} />} onClick={() => copyText(formatted)}>
+            <Button icon={<Copy size={16} />} onClick={() => { copyText(formatted); setUpdateStatus({ tone: "success", message: "Update copied." }); }}>
               Copy
             </Button>
           </div>
@@ -1245,10 +1554,7 @@ function Updates() {
             <Button
               tone="primary"
               icon={<Check size={16} />}
-              onClick={() => {
-                state.upsertUpdate({ ...existing, ...draft, projectId, date });
-                setDraft({});
-              }}
+              onClick={saveUpdate}
               disabled={!projectId}
             >
               Save update
@@ -1256,6 +1562,32 @@ function Updates() {
           </div>
         </div>
       </section>
+      {user?.accessRole === "Admin" ? (
+        <section className="mt-5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">Missing Updates Today</h2>
+            <Pill className={missingToday.length ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>{missingToday.length}</Pill>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {missingToday.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => {
+                  setProjectId(project.id);
+                  setDate(todayISO());
+                  setDraft({});
+                }}
+                className="rounded-md bg-gray-50 p-3 text-left text-sm hover:bg-gray-100"
+              >
+                <span className="font-medium">{project.projectName}</span>
+                <span className="block text-xs text-gray-500">{personName(state.accounts, project.mainDeveloperId || project.designerId)} · {project.deadline || "No deadline"}</span>
+              </button>
+            ))}
+            {!missingToday.length ? <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500 md:col-span-2">Every active project has an update today.</p> : null}
+          </div>
+        </section>
+      ) : null}
       <section className="mt-5 grid gap-3">
         {state.dailyUpdates
           .filter((update) => projects.some((project) => project.id === update.projectId))
@@ -1279,37 +1611,98 @@ function Calendar() {
   const [mode, setMode] = useState<"day" | "week">("day");
   const [date, setDate] = useState(todayISO());
   const [personId, setPersonId] = useState(user?.id || "");
+  const [calendarStatus, setCalendarStatus] = useState<ActionStatus>();
   const activePerson = isAdmin ? personId : user?.id || "";
   const days = mode === "day" ? [date] : Array.from({ length: 7 }, (_, i) => format(addDays(startOfWeek(new Date(date), { weekStartsOn: 1 }), i), "yyyy-MM-dd"));
   const slots = state.calendarSlots.filter((slot) => slot.teamMemberId === activePerson && days.includes(slot.date));
+  const scheduleCandidates = state.tasks.filter((task) => {
+    if (task.personId !== activePerson || taskDone(task)) return false;
+    const left = daysLeft(task.deadline);
+    const scheduled = state.calendarSlots.some((slot) => slot.taskId === task.id || (slot.teamMemberId === activePerson && slot.taskText === task.taskDescription));
+    return !scheduled && (left === undefined || left <= 7);
+  });
 
-  function saveSlot(day: string, time: string, existing?: CalendarSlot) {
+  async function saveSlot(day: string, time: string, existing?: CalendarSlot) {
     const taskText = prompt("Task text", existing?.taskText || "");
     if (taskText === null) return;
-    state.upsertSlot({
-      ...existing,
-      teamMemberId: activePerson,
-      date: day,
-      startTime: time,
-      taskText,
-      status: existing?.status || "To Do",
-      priority: existing?.priority || "Medium",
-    });
+    setCalendarStatus({ tone: "info", message: "Saving calendar slot..." });
+    try {
+      await state.upsertSlot({
+        ...existing,
+        teamMemberId: activePerson,
+        date: day,
+        startTime: time,
+        taskText,
+        status: existing?.status || "To Do",
+        priority: existing?.priority || "Medium",
+      });
+      setCalendarStatus({ tone: "success", message: "Calendar slot saved." });
+    } catch (error) {
+      setCalendarStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save slot." });
+    }
+  }
+
+  async function deleteSlot(slot: CalendarSlot) {
+    if (!confirm("Delete this calendar slot?")) return;
+    setCalendarStatus({ tone: "info", message: "Deleting calendar slot..." });
+    try {
+      await state.deleteSlot(slot.id);
+      setCalendarStatus({ tone: "success", message: "Calendar slot deleted." });
+    } catch (error) {
+      setCalendarStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not delete slot." });
+    }
   }
 
   return (
     <>
       <PageTitle title="Calendar" subtitle="10:00 to 18:00 planner in 30-minute slots." />
+      <div className="mb-4"><ActionNotice status={calendarStatus} /></div>
       <div className="mb-4 flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
         <Button tone={mode === "day" ? "primary" : "default"} onClick={() => setMode("day")}>Day</Button>
         <Button tone={mode === "week" ? "primary" : "default"} onClick={() => setMode("week")}>Week</Button>
         <input className={inputClass()} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         {isAdmin ? (
           <select className={inputClass()} value={personId} onChange={(e) => setPersonId(e.target.value)}>
+            <option value="">Select employee</option>
             {state.accounts.filter((account) => account.accessRole === "Employee").map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
         ) : null}
       </div>
+      {activePerson ? (
+        <section className="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">Tasks to Schedule</h2>
+            <Pill className={scheduleCandidates.length ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>{scheduleCandidates.length}</Pill>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {scheduleCandidates.slice(0, 10).map((task) => (
+              <button
+                key={task.id}
+                type="button"
+                onClick={() => {
+                  void state.upsertSlot({
+                    teamMemberId: activePerson,
+                    date,
+                    startTime: "10:00",
+                    taskText: task.taskDescription,
+                    taskId: task.id,
+                    priority: task.priority,
+                    status: "To Do",
+                  });
+                  setCalendarStatus({ tone: "success", message: "Task added to today's 10:00 slot. Adjust the time if needed." });
+                }}
+                className="min-w-64 rounded-md border border-gray-200 bg-gray-50 p-3 text-left text-sm hover:bg-gray-100"
+              >
+                <span className="font-medium">{task.taskDescription}</span>
+                <span className="block text-xs text-gray-500">{task.deadline || "No deadline"} · {task.priority}</span>
+              </button>
+            ))}
+            {!scheduleCandidates.length ? <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">No urgent unscheduled tasks for this person.</p> : null}
+          </div>
+        </section>
+      ) : (
+        <EmptyState title="Select an employee" detail="Choose an employee to inspect or plan calendar slots." />
+      )}
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-gray-50 text-xs uppercase text-gray-500">
@@ -1334,6 +1727,15 @@ function Calendar() {
                         <span className="block font-medium">{slot?.taskText || "Add plan"}</span>
                         {slot ? <Pill className={cn("mt-1", statusClass[slot.status || "To Do"])}>{slot.status}</Pill> : null}
                       </button>
+                      {slot ? (
+                        <button
+                          type="button"
+                          onClick={() => deleteSlot(slot)}
+                          className="mt-1 text-xs font-medium text-red-600 hover:text-red-700"
+                        >
+                          Delete slot
+                        </button>
+                      ) : null}
                     </td>
                   );
                 })}
@@ -1440,6 +1842,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [resourceDraft, setResourceDraft] = useState<Partial<ResourceLink>>({ category: inspirationOnly ? "Inspiration" : "General" });
   const [storeDraft, setStoreDraft] = useState<Partial<StorePreview>>({});
+  const [directoryStatus, setDirectoryStatus] = useState<ActionStatus>();
   const resources = state.resourceLinks.filter((resource) => {
     const matches = `${resource.name} ${resource.value} ${resource.category}`.toLowerCase().includes(query.toLowerCase());
     return matches && (inspirationOnly ? resource.category === "Inspiration" : true);
@@ -1452,12 +1855,57 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
     return isAdmin && revealed[id] ? value : "••••••••";
   }
 
+  async function saveResource() {
+    setDirectoryStatus({ tone: "info", message: "Saving resource..." });
+    try {
+      await state.upsertResource(resourceDraft);
+      setResourceDraft({ category: inspirationOnly ? "Inspiration" : "General" });
+      setDirectoryStatus({ tone: "success", message: "Resource saved." });
+    } catch (error) {
+      setDirectoryStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save resource." });
+    }
+  }
+
+  async function deleteResource(resource: ResourceLink) {
+    if (!confirm(`Delete "${resource.name}"?`)) return;
+    setDirectoryStatus({ tone: "info", message: "Deleting resource..." });
+    try {
+      await state.deleteResource(resource.id);
+      setDirectoryStatus({ tone: "success", message: "Resource deleted." });
+    } catch (error) {
+      setDirectoryStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not delete resource." });
+    }
+  }
+
+  async function saveStore() {
+    setDirectoryStatus({ tone: "info", message: "Saving store preview..." });
+    try {
+      await state.upsertStorePreview(storeDraft);
+      setStoreDraft({});
+      setDirectoryStatus({ tone: "success", message: "Store preview saved." });
+    } catch (error) {
+      setDirectoryStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save store preview." });
+    }
+  }
+
+  async function deleteStore(store: StorePreview) {
+    if (!confirm(`Delete "${store.storeName}"?`)) return;
+    setDirectoryStatus({ tone: "info", message: "Deleting store preview..." });
+    try {
+      await state.deleteStorePreview(store.id);
+      setDirectoryStatus({ tone: "success", message: "Store preview deleted." });
+    } catch (error) {
+      setDirectoryStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not delete store preview." });
+    }
+  }
+
   return (
     <>
       <PageTitle
         title={inspirationOnly ? "Inspiration" : "Directory"}
         subtitle={inspirationOnly ? "Reusable inspiration links for team reference." : "Team directory, resources, and store preview links."}
       />
+      <div className="mb-4"><ActionNotice status={directoryStatus} /></div>
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
         <Search size={16} className="text-gray-400" />
         <input className="h-9 flex-1 bg-transparent text-sm outline-none" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search directory" />
@@ -1491,7 +1939,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
           </Field>
           <div className="flex items-end gap-2">
             <label className="flex h-9 items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(resourceDraft.isSensitive)} onChange={(e) => setResourceDraft({ ...resourceDraft, isSensitive: e.target.checked })} /> Sensitive</label>
-            <IconButton label="Add resource" tone="primary" onClick={() => { state.upsertResource(resourceDraft); setResourceDraft({ category: inspirationOnly ? "Inspiration" : "General" }); }}><Plus size={16} /></IconButton>
+            <IconButton label="Add resource" tone="primary" onClick={saveResource}><Plus size={16} /></IconButton>
           </div>
         </section>
       ) : null}
@@ -1513,12 +1961,17 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
                 {(!resource.isSensitive || isAdmin) ? (
                   <IconButton label="Copy" onClick={() => copyText(resource.value)}><Copy size={16} /></IconButton>
                 ) : null}
-                {isAdmin ? <IconButton label="Delete" tone="danger" onClick={() => state.deleteResource(resource.id)}><Trash2 size={16} /></IconButton> : null}
+                {isAdmin ? <IconButton label="Delete" tone="danger" onClick={() => deleteResource(resource)}><Trash2 size={16} /></IconButton> : null}
               </div>
             </div>
           </article>
         ))}
       </section>
+      {!resources.length ? (
+        <div className="mt-3">
+          <EmptyState title={inspirationOnly ? "No inspiration links found" : "No resources found"} detail={isAdmin ? "Add useful links, SOPs, passwords, tools, or references from the form above." : "No matching resources are available yet."} />
+        </div>
+      ) : null}
       {!inspirationOnly ? (
         <>
           {isAdmin ? (
@@ -1533,7 +1986,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
                 <input className={inputClass()} value={storeDraft.password || ""} onChange={(e) => setStoreDraft({ ...storeDraft, password: e.target.value })} />
               </Field>
               <div className="flex items-end">
-                <Button tone="primary" icon={<Plus size={16} />} onClick={() => { state.upsertStorePreview(storeDraft); setStoreDraft({}); }}>Add Store</Button>
+                <Button tone="primary" icon={<Plus size={16} />} onClick={saveStore}>Add Store</Button>
               </div>
             </section>
           ) : null}
@@ -1549,12 +2002,13 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
                   <div className="flex gap-2">
                     {isAdmin ? <IconButton label="Reveal" onClick={() => setRevealed({ ...revealed, [store.id]: !revealed[store.id] })}>{revealed[store.id] ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton> : null}
                     {isAdmin ? <IconButton label="Copy combo" onClick={() => copyText(`${store.previewLink || ""}\n${store.password || ""}`)}><Copy size={16} /></IconButton> : null}
-                    {isAdmin ? <IconButton label="Delete" tone="danger" onClick={() => state.deleteStorePreview(store.id)}><Trash2 size={16} /></IconButton> : null}
+                    {isAdmin ? <IconButton label="Delete" tone="danger" onClick={() => deleteStore(store)}><Trash2 size={16} /></IconButton> : null}
                   </div>
                 </div>
               </article>
             ))}
           </section>
+          {!stores.length ? <div className="mt-3"><EmptyState title="No store previews found" detail={isAdmin ? "Add store previews so the team can quickly find preview links and passwords." : "No matching store previews are available yet."} /></div> : null}
         </>
       ) : null}
     </>
@@ -1662,16 +2116,7 @@ function Team() {
         </Field>
         <Field label="Color tag"><input className={inputClass()} type="color" value={draft.colorTag || "#5B5FEF"} onChange={(e) => setDraft({ ...draft, colorTag: e.target.value })} /></Field>
         <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} disabled={accountBusy} onClick={handleAddAccount}>{accountBusy ? "Adding..." : "Add account"}</Button></div>
-        {accountStatus ? (
-          <div className={cn(
-            "rounded-md px-3 py-2 text-sm md:col-span-4",
-            accountStatus.tone === "success" && "border border-emerald-200 bg-emerald-50 text-emerald-800",
-            accountStatus.tone === "error" && "border border-red-200 bg-red-50 text-red-800",
-            accountStatus.tone === "info" && "border border-blue-200 bg-blue-50 text-blue-800",
-          )}>
-            {accountStatus.message}
-          </div>
-        ) : null}
+        <div className="md:col-span-4"><ActionNotice status={accountStatus} /></div>
         <p className="text-xs leading-5 text-gray-500 md:col-span-4">
           New users are created in Supabase Auth with username@openlimits.local. They log in here with the simple username and password you set.
         </p>
@@ -1686,7 +2131,7 @@ function Team() {
           {state.jobRoles.map((role) => (
             <Pill key={role.id} className="bg-gray-100 text-gray-700">
               {role.name}
-              <button type="button" title="Delete role" onClick={() => state.deleteJobRole(role.id)}><Trash2 size={12} /></button>
+              <button type="button" title="Delete role" onClick={() => confirm(`Delete role "${role.name}"?`) && state.deleteJobRole(role.id)}><Trash2 size={12} /></button>
             </Pill>
           ))}
         </div>
@@ -1728,7 +2173,7 @@ function Team() {
                 </td>
                 <td className="flex gap-2 px-3 py-3">
                   <Pill className="bg-gray-100 text-gray-600">Supabase Auth</Pill>
-                  {account.id !== "acct-admin" ? <IconButton label="Delete account" tone="danger" onClick={() => state.deleteAccount(account.id)}><Trash2 size={16} /></IconButton> : null}
+                  {account.id !== "acct-admin" ? <IconButton label="Delete account" tone="danger" onClick={() => confirm(`Delete account "${account.username}"?`) && state.deleteAccount(account.id)}><Trash2 size={16} /></IconButton> : null}
                 </td>
               </tr>
             ))}
