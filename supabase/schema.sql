@@ -36,18 +36,7 @@ create table if not exists public.projects (
   developer2_id text references public.profiles(id),
   designer_id text references public.profiles(id),
   deadline date,
-  status text not null default 'Not Started' check (
-    status in (
-      'Not Started',
-      'Development In Progress',
-      'UI In Progress',
-      'Revision',
-      'Completed',
-      'Delivered',
-      'On Hold',
-      'Cancelled'
-    )
-  ),
+  status text not null default 'Not Started',
   is_priority boolean not null default false,
   delay_blocker text,
   preview_link text,
@@ -58,6 +47,8 @@ create table if not exists public.projects (
   brief_doc_link text,
   notes_last_update text,
   client_chats_link text,
+  project_documents jsonb not null default '[]'::jsonb,
+  project_links jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   delivered_at timestamptz,
   updated_at timestamptz not null default now()
@@ -125,6 +116,8 @@ create table if not exists public.comments (
   entity_id text not null,
   author_id text not null references public.profiles(id),
   text text not null,
+  parent_id text references public.comments(id) on delete cascade,
+  reactions jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -401,6 +394,28 @@ with check (
   )
 );
 
+drop policy if exists "comments scoped update" on public.comments;
+create policy "comments scoped update" on public.comments
+for update to authenticated
+using (
+  public.is_admin()
+  or (entity_type = 'project' and public.can_access_project(entity_id))
+  or (entity_type = 'task' and exists (
+    select 1 from public.tasks t
+    where t.id = comments.entity_id
+      and t.person_id = public.current_profile_id()
+  ))
+)
+with check (
+  public.is_admin()
+  or (entity_type = 'project' and public.can_access_project(entity_id))
+  or (entity_type = 'task' and exists (
+    select 1 from public.tasks t
+    where t.id = comments.entity_id
+      and t.person_id = public.current_profile_id()
+  ))
+);
+
 drop policy if exists "activity scoped read" on public.activity_log;
 create policy "activity scoped read" on public.activity_log
 for select to authenticated
@@ -437,7 +452,7 @@ grant select, insert, update, delete on public.daily_client_updates to authentic
 grant select, insert, update, delete on public.calendar_slots to authenticated;
 grant select, insert, update, delete on public.resource_links to authenticated;
 grant select, insert, update, delete on public.store_previews to authenticated;
-grant select, insert on public.comments to authenticated;
+grant select, insert, update on public.comments to authenticated;
 grant select, insert on public.activity_log to authenticated;
 grant select, insert, update on public.notifications to authenticated;
 

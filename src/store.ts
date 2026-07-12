@@ -40,7 +40,8 @@ interface AppState extends Omit<SeedData, "version"> {
   upsertUpdate: (update: Partial<DailyClientUpdate>) => Promise<void>;
   upsertSlot: (slot: Partial<CalendarSlot>) => Promise<void>;
   deleteSlot: (id: string) => Promise<void>;
-  createComment: (entityType: "project" | "task", entityId: string, text: string) => Promise<void>;
+  createComment: (entityType: "project" | "task", entityId: string, text: string, parentId?: string) => Promise<void>;
+  reactToComment: (commentId: string, emoji: string) => Promise<void>;
   upsertResource: (resource: Partial<ResourceLink>) => Promise<void>;
   deleteResource: (id: string) => Promise<void>;
   upsertStorePreview: (storePreview: Partial<StorePreview>) => Promise<void>;
@@ -111,6 +112,8 @@ function canEditProject(state: AppState, project: Project, patch: Partial<Projec
     "driveAssetsLink",
     "briefDocLink",
     "clientChatsLink",
+    "projectDocuments",
+    "projectLinks",
     "tags",
     "delayBlocker",
   ]);
@@ -164,6 +167,8 @@ const projectFromRow = (row: any): Project => ({
   briefDocLink: row.brief_doc_link || undefined,
   notesLastUpdate: row.notes_last_update || undefined,
   clientChatsLink: row.client_chats_link || undefined,
+  projectDocuments: row.project_documents || [],
+  projectLinks: row.project_links || [],
   createdAt: row.created_at,
   deliveredAt: row.delivered_at || undefined,
   updatedAt: row.updated_at,
@@ -230,6 +235,8 @@ const commentFromRow = (row: any): Comment => ({
   entityId: row.entity_id,
   authorId: row.author_id,
   text: row.text,
+  parentId: row.parent_id || undefined,
+  reactions: row.reactions || {},
   createdAt: row.created_at,
 });
 
@@ -270,6 +277,8 @@ const projectRow = (project: Project) => ({
   brief_doc_link: project.briefDocLink || null,
   notes_last_update: project.notesLastUpdate || null,
   client_chats_link: project.clientChatsLink || null,
+  project_documents: project.projectDocuments || [],
+  project_links: project.projectLinks || [],
   created_at: project.createdAt,
   delivered_at: project.deliveredAt || null,
   updated_at: project.updatedAt,
@@ -330,7 +339,7 @@ async function createAccountWithVercelApi(account: Account, password: string) {
     },
     body: JSON.stringify(accountPayload(account, password)),
   });
-  const result = await response.json().catch(() => ({}));
+  const result = await response.json().catch(async () => ({ error: await response.text().catch(() => "") }));
   if (!response.ok || result.error) throw new Error(result.error || "Vercel account endpoint failed.");
 }
 
@@ -347,7 +356,7 @@ async function updateAccountPasswordWithVercelApi(accountId: string, password: s
     },
     body: JSON.stringify({ accountId, password }),
   });
-  const result = await response.json().catch(() => ({}));
+  const result = await response.json().catch(async () => ({ error: await response.text().catch(() => "") }));
   if (!response.ok || result.error) throw new Error(result.error || "Vercel password endpoint failed.");
 }
 
@@ -363,7 +372,7 @@ async function ensureAdminProfileWithVercelApi() {
       Authorization: `Bearer ${token}`,
     },
   });
-  const result = await response.json().catch(() => ({}));
+  const result = await response.json().catch(async () => ({ error: await response.text().catch(() => "") }));
   if (!response.ok || result.error) throw new Error(result.error || "Admin profile repair failed.");
 }
 
@@ -582,6 +591,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       briefDocLink: project.briefDocLink,
       notesLastUpdate: project.notesLastUpdate,
       clientChatsLink: project.clientChatsLink,
+      projectDocuments: project.projectDocuments || [],
+      projectLinks: project.projectLinks || [],
       createdAt: nowISO(),
       deliveredAt: project.status === "Delivered" ? nowISO() : undefined,
       updatedAt: nowISO(),
@@ -728,7 +739,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadRemoteData();
   },
 
-  async createComment(entityType, entityId, text) {
+  async createComment(entityType, entityId, text, parentId) {
     const state = get();
     const user = actor(state);
     if (!user || !text.trim()) return;
@@ -738,6 +749,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       entity_id: entityId,
       author_id: user.id,
       text: text.trim(),
+      parent_id: parentId || null,
+      reactions: {},
       created_at: nowISO(),
     }).select());
     const recipients = entityType === "project"
@@ -745,6 +758,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       : state.tasks.filter((task) => task.id === entityId).map((task) => task.personId);
     await insertNotifications(recipients.filter((id): id is string => Boolean(id && id !== user.id)), `New comment on ${entityType}`, entityType === "project" ? "/projects" : "/tasks");
     await insertActivity({ entityType, entityId, actorId: user.id, action: "Added comment" });
+    await get().loadRemoteData();
+  },
+
+  async reactToComment(commentId, emoji) {
+    const state = get();
+    const user = actor(state);
+    const comment = state.comments.find((item) => item.id === commentId);
+    if (!user || !comment) throw new Error("Not allowed.");
+    const reactions = { ...(comment.reactions || {}) };
+    if (reactions[user.id] === emoji) {
+      delete reactions[user.id];
+    } else {
+      reactions[user.id] = emoji;
+    }
+    await expectOk(client().from("comments").update({ reactions }).eq("id", commentId).select());
     await get().loadRemoteData();
   },
 

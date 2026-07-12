@@ -18,19 +18,26 @@ export interface Account {
   createdAt: string;
 }
 
-export type ProjectStatus =
-  | "Not Started"
-  | "Development In Progress"
-  | "UI In Progress"
-  | "Revision"
-  | "Completed"
-  | "Delivered"
-  | "On Hold"
-  | "Cancelled";
+export type ProjectStatus = string;
 
 export interface ChecklistItem {
   text: string;
   done: boolean;
+}
+
+export interface ProjectDocument {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+  addedAt: string;
+}
+
+export interface ProjectLink {
+  id: string;
+  label: string;
+  url: string;
 }
 
 export interface Project {
@@ -52,6 +59,8 @@ export interface Project {
   briefDocLink?: string;
   notesLastUpdate?: string;
   clientChatsLink?: string;
+  projectDocuments: ProjectDocument[];
+  projectLinks: ProjectLink[];
   createdAt: string;
   deliveredAt?: string;
   updatedAt: string;
@@ -128,6 +137,8 @@ export interface Comment {
   entityId: string;
   authorId: string;
   text: string;
+  parentId?: string;
+  reactions: Record<string, string>;
   createdAt: string;
 }
 

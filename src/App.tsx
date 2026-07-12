@@ -6,6 +6,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
   useSearchParams,
 } from "react-router-dom";
 import {
@@ -18,6 +19,8 @@ import {
   Copy,
   Eye,
   EyeOff,
+  ExternalLink,
+  FileText,
   Flag,
   Gauge,
   HelpCircle,
@@ -28,6 +31,7 @@ import {
   LogOut,
   MessageSquare,
   Plus,
+  Reply,
   Search,
   Settings,
   Shield,
@@ -63,6 +67,8 @@ import type {
   DailyClientUpdate,
   Priority,
   Project,
+  ProjectDocument,
+  ProjectLink,
   ProjectStatus,
   ResourceLink,
   StorePreview,
@@ -98,6 +104,17 @@ const statusClass: Record<string, string> = {
   Cancelled: "bg-red-100 text-red-800",
   Overdue: "bg-red-100 text-red-800",
 };
+
+function statusTone(status?: string) {
+  const key = (status || "").toLowerCase();
+  if (status && statusClass[status]) return statusClass[status];
+  if (/(delivered|complete|done|approved|live|launch)/.test(key)) return "bg-emerald-100 text-emerald-800";
+  if (/(cancel|reject|block|risk|stuck|overdue|failed)/.test(key)) return "bg-red-100 text-red-800";
+  if (/(hold|wait|revision|review|client|qa|pending)/.test(key)) return "bg-amber-100 text-amber-800";
+  if (/(progress|develop|design|ui|working|build)/.test(key)) return "bg-blue-100 text-blue-800";
+  if (/(priority|urgent|close)/.test(key)) return "bg-orange-100 text-orange-800";
+  return "bg-slate-100 text-slate-700";
+}
 
 function cn(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -189,6 +206,10 @@ function inputClass() {
 
 function textareaClass() {
   return "min-h-20 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-[var(--accent)]";
+}
+
+function makeId(prefix: string) {
+  return `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now().toString(36)}`;
 }
 
 function Pill({ children, className }: { children: ReactNode; className?: string }) {
@@ -739,7 +760,7 @@ function Dashboard() {
                     <span className="mono text-gray-500">{(entry.item as CalendarSlot).startTime}</span>{" "}
                     {(entry.item as CalendarSlot).taskText || "Planned work"}
                   </span>
-                  <Pill className={statusClass[(entry.item as CalendarSlot).status || "To Do"]}>
+                  <Pill className={statusTone((entry.item as CalendarSlot).status || "To Do")}>
                     {(entry.item as CalendarSlot).status || "To Do"}
                   </Pill>
                 </div>
@@ -820,9 +841,87 @@ function personName(accounts: Account[], id?: string) {
 function AddProjectForm({ onClose }: { onClose: () => void }) {
   const state = useAppStore();
   const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
-  const [project, setProject] = useState<Partial<Project>>({ status: "Not Started", isPriority: false });
+  const [project, setProject] = useState<Partial<Project>>({ status: "Not Started", isPriority: false, projectDocuments: [], projectLinks: [] });
+  const statusOptions = Array.from(new Set([...PROJECT_STATUSES, ...state.projects.map((item) => item.status), project.status].filter(Boolean))) as string[];
+  const [newMemberFor, setNewMemberFor] = useState<"developer" | "designer" | null>(null);
+  const [newMember, setNewMember] = useState({ name: "", username: "", password: "" });
+  const [newStatus, setNewStatus] = useState("");
+  const [addingStatus, setAddingStatus] = useState(false);
+  const [linkDraft, setLinkDraft] = useState({ label: "", url: "" });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<ActionStatus>();
+
+  async function createInlineMember() {
+    if (!newMemberFor) return;
+    if (!newMember.name.trim() || !newMember.username.trim() || !newMember.password.trim()) {
+      setStatus({ tone: "error", message: "Name, username, and password are required for a new teammate." });
+      return;
+    }
+    const roleName = newMemberFor === "developer" ? "Developer" : "Designer";
+    const roleId = state.jobRoles.find((role) => role.name.toLowerCase().includes(roleName.toLowerCase()))?.id || state.jobRoles[0]?.id || "";
+    setSaving(true);
+    setStatus({ tone: "info", message: `Creating ${roleName.toLowerCase()} account...` });
+    try {
+      await state.upsertAccount({
+        name: newMember.name,
+        username: newMember.username,
+        passwordHash: newMember.password,
+        accessRole: "Employee",
+        jobRoleId: roleId,
+        role: roleName,
+        colorTag: newMemberFor === "developer" ? "#2563EB" : "#D946EF",
+        active: true,
+      });
+      const created = useAppStore.getState().accounts.find((account) => account.username === newMember.username.trim().toLowerCase());
+      if (created) {
+        setProject((current) => ({
+          ...current,
+          [newMemberFor === "developer" ? "mainDeveloperId" : "designerId"]: created.id,
+        }));
+      }
+      setNewMember({ name: "", username: "", password: "" });
+      setNewMemberFor(null);
+      setStatus({ tone: "success", message: `${roleName} account created and selected.` });
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not create teammate." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addDocuments(files: FileList | null) {
+    if (!files?.length) return;
+    const documents = await Promise.all(Array.from(files).map((file) => new Promise<ProjectDocument>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        id: makeId("doc"),
+        name: file.name,
+        type: file.type || file.name.split(".").pop() || "file",
+        size: file.size,
+        dataUrl: String(reader.result || ""),
+        addedAt: new Date().toISOString(),
+      });
+      reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+      reader.readAsDataURL(file);
+    })));
+    setProject((current) => ({
+      ...current,
+      projectDocuments: [...(current.projectDocuments || []), ...documents],
+    }));
+  }
+
+  function addNamedLink() {
+    if (!linkDraft.url.trim()) return;
+    setProject((current) => ({
+      ...current,
+      projectLinks: [
+        ...(current.projectLinks || []),
+        { id: makeId("link"), label: linkDraft.label.trim() || "Project link", url: linkDraft.url.trim() },
+      ],
+    }));
+    setLinkDraft({ label: "", url: "" });
+  }
+
   return (
     <form
       onSubmit={async (event) => {
@@ -839,9 +938,9 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
           setSaving(false);
         }
       }}
-      className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-3"
+      className="mb-5 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-3"
     >
-      <div className="md:col-span-3"><ActionNotice status={status} /></div>
+      <div className="lg:col-span-3"><ActionNotice status={status} /></div>
       <Field label="Project">
         <input className={inputClass()} required onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
       </Field>
@@ -852,22 +951,97 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         <input className={inputClass()} type="date" onChange={(e) => setProject({ ...project, deadline: e.target.value })} />
       </Field>
       <Field label="Developer">
-        <select className={inputClass()} onChange={(e) => setProject({ ...project, mainDeveloperId: e.target.value })}>
+        <select
+          className={inputClass()}
+          value={project.mainDeveloperId || ""}
+          onChange={(e) => {
+            if (e.target.value === "__add_new") {
+              setNewMemberFor("developer");
+              return;
+            }
+            setProject({ ...project, mainDeveloperId: e.target.value || undefined });
+          }}
+        >
           <option value="">Unassigned</option>
+          <option value="__add_new">+ Add new developer</option>
           {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
         </select>
       </Field>
       <Field label="Designer">
-        <select className={inputClass()} onChange={(e) => setProject({ ...project, designerId: e.target.value })}>
+        <select
+          className={inputClass()}
+          value={project.designerId || ""}
+          onChange={(e) => {
+            if (e.target.value === "__add_new") {
+              setNewMemberFor("designer");
+              return;
+            }
+            setProject({ ...project, designerId: e.target.value || undefined });
+          }}
+        >
           <option value="">Unassigned</option>
+          <option value="__add_new">+ Add new designer</option>
           {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
         </select>
       </Field>
       <Field label="Status">
-        <select className={inputClass()} value={project.status} onChange={(e) => setProject({ ...project, status: e.target.value as ProjectStatus })}>
-          {PROJECT_STATUSES.map((status) => <option key={status}>{status}</option>)}
+        <select
+          className={inputClass()}
+          value={project.status}
+          onChange={(e) => {
+            if (e.target.value === "__add_status") {
+              setNewStatus("");
+              setAddingStatus(true);
+              return;
+            }
+            setAddingStatus(false);
+            setProject({ ...project, status: e.target.value as ProjectStatus });
+          }}
+        >
+          {statusOptions.filter(Boolean).map((status) => <option key={status}>{status}</option>)}
+          <option value="__add_status">+ Add new status</option>
         </select>
       </Field>
+      {newMemberFor ? (
+        <div className="grid gap-3 rounded-md border border-blue-100 bg-blue-50 p-3 lg:col-span-3 lg:grid-cols-4">
+          <Field label={`New ${newMemberFor}`}>
+            <input className={inputClass()} value={newMember.name} onChange={(e) => setNewMember({ ...newMember, name: e.target.value })} placeholder="Full name" />
+          </Field>
+          <Field label="Username">
+            <input className={inputClass()} value={newMember.username} onChange={(e) => setNewMember({ ...newMember, username: e.target.value })} placeholder="login ID" />
+          </Field>
+          <Field label="Password">
+            <input className={inputClass()} value={newMember.password} onChange={(e) => setNewMember({ ...newMember, password: e.target.value })} placeholder="temporary password" />
+          </Field>
+          <div className="flex items-end gap-2">
+            <Button onClick={createInlineMember} tone="primary" disabled={saving}>Create</Button>
+            <Button onClick={() => setNewMemberFor(null)}>Cancel</Button>
+          </div>
+        </div>
+      ) : null}
+      {addingStatus ? (
+        <div className="grid gap-3 rounded-md border border-amber-100 bg-amber-50 p-3 lg:col-span-3 lg:grid-cols-[1fr_auto_auto]">
+          <Field label="New status name">
+            <input className={inputClass()} value={newStatus} onChange={(e) => setNewStatus(e.target.value)} placeholder="For example: Client Review" />
+          </Field>
+          <div className="flex items-end">
+            <Pill className={statusTone(newStatus || "Custom")}>{newStatus || "Color preview"}</Pill>
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={() => {
+                if (!newStatus.trim()) return;
+                setProject({ ...project, status: newStatus.trim() });
+                setAddingStatus(false);
+                setNewStatus("");
+              }}
+              tone="primary"
+            >
+              Use status
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
         <input type="checkbox" onChange={(e) => setProject({ ...project, isPriority: e.target.checked })} />
         Priority
@@ -881,7 +1055,43 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
       <Field label="Drive assets">
         <input className={inputClass()} onChange={(e) => setProject({ ...project, driveAssetsLink: e.target.value })} />
       </Field>
-      <div className="flex items-end gap-2 md:col-span-2">
+      <div className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:col-span-3 lg:grid-cols-[1fr_1fr_auto]">
+        <Field label="Link name">
+          <input className={inputClass()} value={linkDraft.label} onChange={(e) => setLinkDraft({ ...linkDraft, label: e.target.value })} placeholder="Client brief, staging, video..." />
+        </Field>
+        <Field label="URL">
+          <input className={inputClass()} value={linkDraft.url} onChange={(e) => setLinkDraft({ ...linkDraft, url: e.target.value })} placeholder="https://" />
+        </Field>
+        <div className="flex items-end">
+          <Button onClick={addNamedLink} icon={<Plus size={16} />}>Add link</Button>
+        </div>
+        {(project.projectLinks || []).length ? (
+          <div className="flex flex-wrap gap-2 lg:col-span-3">
+            {(project.projectLinks || []).map((link) => (
+              <Pill key={link.id} className="bg-white text-gray-700">
+                {link.label}
+                <button type="button" onClick={() => setProject({ ...project, projectLinks: (project.projectLinks || []).filter((item) => item.id !== link.id) })} className="ml-1 text-gray-400">x</button>
+              </Pill>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-3 lg:col-span-3">
+        <Field label="Project documents">
+          <input className={cn(inputClass(), "h-auto py-2")} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.fig" onChange={(event) => void addDocuments(event.target.files)} />
+        </Field>
+        {(project.projectDocuments || []).length ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(project.projectDocuments || []).map((document) => (
+              <Pill key={document.id} className="bg-white text-gray-700">
+                <FileText size={13} /> {document.name}
+                <button type="button" onClick={() => setProject({ ...project, projectDocuments: (project.projectDocuments || []).filter((item) => item.id !== document.id) })} className="ml-1 text-gray-400">x</button>
+              </Pill>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="flex items-end gap-2 lg:col-span-2">
         <Button type="submit" tone="primary" icon={<Plus size={16} />} disabled={saving}>{saving ? "Adding..." : "Add project"}</Button>
         <Button onClick={onClose}>Cancel</Button>
       </div>
@@ -906,7 +1116,7 @@ function CommentsPanel({ entityType, entityId }: { entityType: "project" | "task
         className="mt-3 flex gap-2"
       >
         <input className={cn(inputClass(), "flex-1")} value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment" />
-        <IconButton label="Add comment" tone="primary"><Plus size={16} /></IconButton>
+        <Button type="submit" tone="primary" icon={<Plus size={16} />}>Add</Button>
       </form>
       <div className="mt-3 grid gap-2">
         {comments.map((comment) => (
@@ -984,8 +1194,8 @@ function projectTeam(project: Project, accounts: Account[]) {
 function projectHealth(project: Project) {
   const left = daysLeft(project.deadline);
   const overdue = isOverdue(project.deadline, projectDone(project));
-  if (project.status === "Delivered") return { label: "Delivered", className: statusClass.Delivered };
-  if (overdue) return { label: "Overdue", className: statusClass.Overdue };
+  if (project.status === "Delivered") return { label: "Delivered", className: statusTone("Delivered") };
+  if (overdue) return { label: "Overdue", className: statusTone("Overdue") };
   if (left !== undefined && left <= 3) return { label: "Close deadline", className: "bg-orange-100 text-orange-800" };
   if (!project.mainDeveloperId && !project.designerId && !project.developer2Id) return { label: "Unassigned", className: "bg-slate-100 text-slate-700" };
   return { label: "Healthy", className: "bg-emerald-100 text-emerald-800" };
@@ -1118,22 +1328,23 @@ function ProjectCard({
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const isAdmin = user?.accessRole === "Admin";
-  const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
   const left = daysLeft(project.deadline);
   const overdue = isOverdue(project.deadline, projectDone(project));
   const progress = checklistPercent(project.checklist);
   const health = projectHealth(project);
   const team = projectTeam(project, state.accounts);
+  const openTasks = state.tasks.filter((task) => task.projectId === project.id && !taskDone(task)).length;
+  const links = projectLinks(project).slice(0, 3);
 
   return (
-    <article className="flex min-h-[440px] flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <article className="flex min-h-[260px] flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="mb-2 flex flex-wrap gap-1">
             <Pill className={health.className}>{health.label}</Pill>
             {project.isPriority ? <Pill className="bg-orange-100 text-orange-800"><Flag size={12} /> Priority</Pill> : null}
           </div>
-          <h2 className="text-lg font-semibold leading-snug">{project.projectName}</h2>
+          <h2 className="truncate text-base font-semibold leading-snug">{project.projectName}</h2>
           <p className="mt-1 text-sm text-gray-500">@{project.clientUsername || "client"}</p>
         </div>
         {isAdmin ? (
@@ -1143,7 +1354,7 @@ function ProjectCard({
         ) : null}
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-3">
+      <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-3 text-sm">
         <div>
           <p className="text-xs text-gray-500">Project manager</p>
           <p className="mt-1 truncate text-sm font-semibold">{personName(state.accounts, project.mainDeveloperId || project.designerId)}</p>
@@ -1162,7 +1373,7 @@ function ProjectCard({
         </div>
         <div>
           <p className="text-xs text-gray-500">Status</p>
-          <Pill className={cn("mt-1", statusClass[project.status])}>{project.status}</Pill>
+          <Pill className={cn("mt-1", statusTone(project.status))}>{project.status}</Pill>
         </div>
       </div>
 
@@ -1179,70 +1390,358 @@ function ProjectCard({
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Pill className="bg-slate-100 text-slate-700">{team.length || 0} people</Pill>
+        <Pill className="bg-blue-50 text-blue-700">{openTasks} open tasks</Pill>
+        <Pill className="bg-gray-100 text-gray-700">{project.projectDocuments?.length || 0} files</Pill>
+        {links.map((link) => (
+          <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+            <LinkIcon size={13} /> {link.label}
+          </a>
+        ))}
+      </div>
+
       <div className="mt-4">
-        <p className="mb-2 text-xs font-semibold uppercase text-gray-500">Working on it</p>
-        <div className="grid gap-2">
-          {team.length ? team.map((member) => (
-            <div key={`${member.label}-${member.id}`} className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 px-2 py-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="size-2.5 shrink-0 rounded-full" style={{ background: member.color }} />
-                <span className="truncate text-sm font-medium">{member.name}</span>
-              </div>
-              <span className="ml-2 shrink-0 text-xs text-gray-500">{member.label}</span>
-            </div>
-          )) : (
-            <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-500">No team assigned yet.</div>
-          )}
+        <p className="mb-2 text-xs font-semibold uppercase text-gray-500">Team</p>
+        <div className="flex -space-x-2">
+          {team.slice(0, 4).map((member) => (
+            <span
+              key={`${member.label}-${member.id}`}
+              title={`${member.name} · ${member.label}`}
+              className="inline-flex size-8 items-center justify-center rounded-full border-2 border-white text-xs font-bold text-white"
+              style={{ background: member.color }}
+            >
+              {member.name.slice(0, 1)}
+            </span>
+          ))}
+          {!team.length ? <span className="text-sm text-gray-500">Unassigned</span> : null}
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2">
-        {isAdmin ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select className={inputClass()} value={project.mainDeveloperId || ""} onChange={(e) => onPatch(project, { mainDeveloperId: e.target.value || undefined })}>
-              <option value="">Project manager / dev</option>
-              {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
-            <select className={inputClass()} value={project.designerId || ""} onChange={(e) => onPatch(project, { designerId: e.target.value || undefined })}>
-              <option value="">Designer</option>
-              {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
-            <input className={inputClass()} type="date" value={project.deadline || ""} onChange={(e) => onPatch(project, { deadline: e.target.value })} />
-            <select className={inputClass()} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
-              {PROJECT_STATUSES.map((status) => <option key={status}>{status}</option>)}
-            </select>
-            <input className={inputClass()} value={project.previewLink || ""} onChange={(e) => onPatch(project, { previewLink: e.target.value })} placeholder="Preview link" />
-            <input className={inputClass()} value={project.figmaLink || ""} onChange={(e) => onPatch(project, { figmaLink: e.target.value })} placeholder="Figma link" />
-            <input className={inputClass()} value={project.driveAssetsLink || ""} onChange={(e) => onPatch(project, { driveAssetsLink: e.target.value })} placeholder="Drive assets link" />
-            <input className={inputClass()} value={project.briefDocLink || ""} onChange={(e) => onPatch(project, { briefDocLink: e.target.value })} placeholder="Brief doc link" />
-          </div>
-        ) : (
-          <select className={inputClass()} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
-            {PROJECT_STATUSES.map((status) => <option key={status}>{status}</option>)}
-          </select>
-        )}
-        {project.status === "On Hold" ? (
-          <input className={inputClass()} value={project.delayBlocker || ""} onChange={(e) => onPatch(project, { delayBlocker: e.target.value })} placeholder="Blocker required" />
-        ) : null}
-      </div>
-
-      <div className="mt-4">
-        <ChecklistEditor value={project.checklist} onChange={(checklist) => onPatch(project, { checklist })} />
-      </div>
-
-      <textarea className={cn(textareaClass(), "mt-4")} value={project.notesLastUpdate || ""} onChange={(e) => onPatch(project, { notesLastUpdate: e.target.value })} placeholder="Latest note" />
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {project.previewLink ? <a className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700" href={project.previewLink} target="_blank"><LinkIcon size={14} /> Preview</a> : null}
-        {project.figmaLink ? <a className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700" href={project.figmaLink} target="_blank"><LinkIcon size={14} /> Figma</a> : null}
-        {project.driveAssetsLink ? <a className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700" href={project.driveAssetsLink} target="_blank"><LinkIcon size={14} /> Assets</a> : null}
-        {project.briefDocLink ? <a className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700" href={project.briefDocLink} target="_blank"><LinkIcon size={14} /> Brief</a> : null}
-      </div>
-
-      <div className="mt-auto pt-3">
-        <CommentsPanel entityType="project" entityId={project.id} />
+      <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+        <select className={cn(inputClass(), "max-w-[190px]")} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
+          {Array.from(new Set([...PROJECT_STATUSES, project.status])).map((status) => <option key={status}>{status}</option>)}
+        </select>
+        <a href={`/projects/${project.id}`} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-sm font-semibold text-white transition hover:brightness-95">
+          <ExternalLink size={15} /> Open detail
+        </a>
       </div>
     </article>
+  );
+}
+
+function projectLinks(project: Project): ProjectLink[] {
+  return [
+    project.previewLink ? { id: "preview", label: "Preview", url: project.previewLink } : undefined,
+    project.figmaLink ? { id: "figma", label: "Figma", url: project.figmaLink } : undefined,
+    project.driveAssetsLink ? { id: "assets", label: "Assets", url: project.driveAssetsLink } : undefined,
+    project.briefDocLink ? { id: "brief", label: "Brief", url: project.briefDocLink } : undefined,
+    project.clientChatsLink ? { id: "chat", label: "Client chat", url: project.clientChatsLink } : undefined,
+    ...(project.projectLinks || []),
+  ].filter((link): link is ProjectLink => Boolean(link?.url));
+}
+
+function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ProjectChat({ projectId }: { projectId: string }) {
+  const state = useAppStore();
+  const user = state.accounts.find((account) => account.id === state.sessionAccountId);
+  const isAdmin = user?.accessRole === "Admin";
+  const [commentText, setCommentText] = useState("");
+  const [replyText, setReplyText] = useState<Record<string, string>>({});
+  const comments = state.comments
+    .filter((comment) => comment.entityType === "project" && comment.entityId === projectId)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const topLevel = comments.filter((comment) => !comment.parentId);
+  const emojis = ["👍", "✅", "👀", "🚧", "❤️"];
+
+  async function submitComment(parentId?: string) {
+    const text = parentId ? replyText[parentId] : commentText;
+    if (!text?.trim()) return;
+    await state.createComment("project", projectId, text, parentId);
+    if (parentId) setReplyText({ ...replyText, [parentId]: "" });
+    else setCommentText("");
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <MessageSquare size={18} className="text-[var(--accent)]" />
+        <h2 className="text-base font-semibold">Project conversation</h2>
+      </div>
+      {isAdmin ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitComment();
+          }}
+          className="mb-4 flex flex-col gap-2 sm:flex-row"
+        >
+          <input className={cn(inputClass(), "flex-1")} value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add an admin note for the team" />
+          <Button type="submit" tone="primary" icon={<Plus size={16} />}>Post</Button>
+        </form>
+      ) : null}
+      <div className="grid gap-3">
+        {topLevel.map((comment) => {
+          const replies = comments.filter((item) => item.parentId === comment.id);
+          const reactionCounts = Object.entries(comment.reactions || {}).reduce<Record<string, number>>((acc, [, emoji]) => {
+            acc[emoji] = (acc[emoji] || 0) + 1;
+            return acc;
+          }, {});
+          return (
+            <div key={comment.id} className="rounded-lg bg-gray-50 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-gray-900">{personName(state.accounts, comment.authorId)}</p>
+                  <p className="mt-1 text-sm text-gray-700">{comment.text}</p>
+                  <p className="mt-1 text-xs text-gray-400">{format(new Date(comment.createdAt), "MMM d, h:mm a")}</p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1">
+                {emojis.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => state.reactToComment(comment.id, emoji)}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs",
+                      comment.reactions?.[user?.id || ""] === emoji ? "border-[var(--accent)] bg-blue-50" : "border-gray-200 bg-white",
+                    )}
+                  >
+                    {emoji} {reactionCounts[emoji] || ""}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 grid gap-2 border-l-2 border-gray-200 pl-3">
+                {replies.map((reply) => (
+                  <div key={reply.id} className="rounded-md bg-white p-2 text-sm">
+                    <span className="font-semibold">{personName(state.accounts, reply.authorId)}:</span> {reply.text}
+                  </div>
+                ))}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitComment(comment.id);
+                  }}
+                  className="flex flex-col gap-2 sm:flex-row"
+                >
+                  <input className={cn(inputClass(), "flex-1")} value={replyText[comment.id] || ""} onChange={(e) => setReplyText({ ...replyText, [comment.id]: e.target.value })} placeholder="Reply to this note" />
+                  <Button type="submit" icon={<Reply size={15} />}>Reply</Button>
+                </form>
+              </div>
+            </div>
+          );
+        })}
+        {!topLevel.length ? <EmptyState title="No comments yet" detail={isAdmin ? "Post the first project note so the team can reply or react." : "The admin has not posted a project note yet."} /> : null}
+      </div>
+    </section>
+  );
+}
+
+function ProjectDetail() {
+  const { projectId } = useParams();
+  const state = useAppStore();
+  const user = state.accounts.find((account) => account.id === state.sessionAccountId);
+  const isAdmin = user?.accessRole === "Admin";
+  const project = state.projects.find((item) => item.id === projectId);
+  const [status, setStatus] = useState<ActionStatus>();
+  const [linkDraft, setLinkDraft] = useState({ label: "", url: "" });
+  const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
+
+  if (!project || !scopedProjects(state.projects, user).some((item) => item.id === project.id)) {
+    return <EmptyState title="Project not found" detail="This project either does not exist or is not assigned to your account." />;
+  }
+
+  const selectedProject = project;
+  const tasks = state.tasks.filter((task) => task.projectId === selectedProject.id);
+  const progress = checklistPercent(selectedProject.checklist);
+  const team = projectTeam(selectedProject, state.accounts);
+
+  async function patch(patchValue: Partial<Project>) {
+    setStatus({ tone: "info", message: "Saving project..." });
+    try {
+      await state.updateProject(selectedProject.id, patchValue);
+      setStatus({ tone: "success", message: "Project saved." });
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save project." });
+    }
+  }
+
+  async function addDocuments(files: FileList | null) {
+    if (!files?.length) return;
+    const documents = await Promise.all(Array.from(files).map((file) => new Promise<ProjectDocument>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        id: makeId("doc"),
+        name: file.name,
+        type: file.type || file.name.split(".").pop() || "file",
+        size: file.size,
+        dataUrl: String(reader.result || ""),
+        addedAt: new Date().toISOString(),
+      });
+      reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+      reader.readAsDataURL(file);
+    })));
+    await patch({ projectDocuments: [...(selectedProject.projectDocuments || []), ...documents] });
+  }
+
+  function addNamedLink() {
+    if (!linkDraft.url.trim()) return;
+    void patch({
+      projectLinks: [
+        ...(selectedProject.projectLinks || []),
+        { id: makeId("link"), label: linkDraft.label.trim() || "Project link", url: linkDraft.url.trim() },
+      ],
+    });
+    setLinkDraft({ label: "", url: "" });
+  }
+
+  return (
+    <>
+      <PageTitle
+        title={project.projectName}
+        subtitle={`${project.clientUsername || "No client"} · ${team.length || 0} assigned · ${tasks.length} tasks`}
+        action={<Pill className={statusTone(project.status)}>{project.status}</Pill>}
+      />
+      <div className="mb-4"><ActionNotice status={status} /></div>
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-md bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">Completion</p>
+              <p className="mt-1 text-2xl font-bold">{progress}%</p>
+              <div className="mt-2 h-2 rounded-full bg-gray-200"><div className="h-2 rounded-full bg-[var(--accent)]" style={{ width: `${progress}%` }} /></div>
+            </div>
+            <div className="rounded-md bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">Deadline</p>
+              <p className={cn("mt-1 text-lg font-semibold", isOverdue(project.deadline, projectDone(project)) && "text-red-600")}>{project.deadline || "Not set"}</p>
+            </div>
+            <div className="rounded-md bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">Health</p>
+              <Pill className={cn("mt-2", projectHealth(project).className)}>{projectHealth(project).label}</Pill>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {isAdmin ? (
+              <>
+                <Field label="Developer">
+                  <select className={inputClass()} value={project.mainDeveloperId || ""} onChange={(e) => void patch({ mainDeveloperId: e.target.value || undefined })}>
+                    <option value="">Unassigned</option>
+                    {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Designer">
+                  <select className={inputClass()} value={project.designerId || ""} onChange={(e) => void patch({ designerId: e.target.value || undefined })}>
+                    <option value="">Unassigned</option>
+                    {employees.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Deadline">
+                  <input className={inputClass()} type="date" value={project.deadline || ""} onChange={(e) => void patch({ deadline: e.target.value })} />
+                </Field>
+              </>
+            ) : null}
+            <Field label="Status">
+              <select className={inputClass()} value={project.status} onChange={(e) => void patch({ status: e.target.value })}>
+                {Array.from(new Set([...PROJECT_STATUSES, project.status])).map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </Field>
+            {project.status === "On Hold" ? (
+              <Field label="Blocker">
+                <input className={inputClass()} value={project.delayBlocker || ""} onChange={(e) => void patch({ delayBlocker: e.target.value })} />
+              </Field>
+            ) : null}
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <div>
+              <h2 className="mb-2 text-sm font-semibold">Checklist</h2>
+              <ChecklistEditor value={project.checklist} onChange={(checklist) => void patch({ checklist })} />
+            </div>
+            <Field label="Latest note">
+              <textarea className={textareaClass()} value={project.notesLastUpdate || ""} onChange={(e) => void patch({ notesLastUpdate: e.target.value })} />
+            </Field>
+          </div>
+        </section>
+
+        <section className="grid gap-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-base font-semibold">Links</h2>
+            <div className="grid gap-2">
+              {projectLinks(project).map((link) => (
+                <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+                  <span className="truncate">{link.label}</span>
+                  <ExternalLink size={14} />
+                </a>
+              ))}
+              {!projectLinks(project).length ? <p className="text-sm text-gray-500">No links added yet.</p> : null}
+            </div>
+            {isAdmin ? (
+              <div className="mt-3 grid gap-2">
+                {(project.projectLinks || []).map((link) => (
+                  <div key={link.id} className="grid gap-2 sm:grid-cols-[0.7fr_1fr_auto]">
+                    <input className={inputClass()} value={link.label} onChange={(e) => void patch({ projectLinks: (project.projectLinks || []).map((item) => item.id === link.id ? { ...item, label: e.target.value } : item) })} />
+                    <input className={inputClass()} value={link.url} onChange={(e) => void patch({ projectLinks: (project.projectLinks || []).map((item) => item.id === link.id ? { ...item, url: e.target.value } : item) })} />
+                    <IconButton label="Remove link" tone="danger" onClick={() => void patch({ projectLinks: (project.projectLinks || []).filter((item) => item.id !== link.id) })}><Trash2 size={15} /></IconButton>
+                  </div>
+                ))}
+                <div className="grid gap-2 sm:grid-cols-[0.7fr_1fr_auto]">
+                  <input className={inputClass()} value={linkDraft.label} onChange={(e) => setLinkDraft({ ...linkDraft, label: e.target.value })} placeholder="Link name" />
+                  <input className={inputClass()} value={linkDraft.url} onChange={(e) => setLinkDraft({ ...linkDraft, url: e.target.value })} placeholder="https://" />
+                  <IconButton label="Add link" tone="primary" onClick={addNamedLink}><Plus size={15} /></IconButton>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-base font-semibold">Documents</h2>
+            <div className="grid gap-2">
+              {(project.projectDocuments || []).map((document) => (
+                <div key={document.id} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{document.name}</p>
+                    <p className="text-xs text-gray-500">{fileSize(document.size)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <a href={document.dataUrl} download={document.name} className="inline-flex size-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-700"><FileText size={15} /></a>
+                    {isAdmin ? <IconButton label="Remove document" tone="danger" onClick={() => void patch({ projectDocuments: (project.projectDocuments || []).filter((item) => item.id !== document.id) })}><Trash2 size={15} /></IconButton> : null}
+                  </div>
+                </div>
+              ))}
+              {!project.projectDocuments?.length ? <p className="text-sm text-gray-500">No documents attached yet.</p> : null}
+            </div>
+            {isAdmin ? (
+              <input className={cn(inputClass(), "mt-3 h-auto w-full py-2")} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.fig" onChange={(event) => void addDocuments(event.target.files)} />
+            ) : null}
+          </div>
+        </section>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+        <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-base font-semibold">Project tasks</h2>
+          <div className="grid gap-2">
+            {tasks.map((task) => (
+              <div key={task.id} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">{task.taskDescription}</p>
+                  <Pill className={statusTone(task.status)}>{task.status}</Pill>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">{personName(state.accounts, task.personId)} · {task.deadline || "No deadline"}</p>
+              </div>
+            ))}
+            {!tasks.length ? <p className="text-sm text-gray-500">No tasks connected to this project yet.</p> : null}
+          </div>
+        </section>
+        <ProjectChat projectId={project.id} />
+      </div>
+    </>
   );
 }
 
@@ -1429,7 +1928,7 @@ function TaskCard({ task, onPatch, onDelete }: { task: Task; onPatch: (task: Tas
     <article className="flex min-h-[360px] flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <Pill className={cn(overdue ? statusClass.Overdue : statusClass[task.status])}>
+          <Pill className={cn(overdue ? statusTone("Overdue") : statusTone(task.status))}>
             {overdue ? "Overdue" : task.status}
           </Pill>
           <h3 className="mt-2 text-lg font-semibold leading-snug">{task.taskDescription}</h3>
@@ -1725,7 +2224,7 @@ function Calendar() {
                         className="min-h-12 w-full rounded-md border border-gray-200 bg-gray-50 p-2 text-left hover:bg-gray-100"
                       >
                         <span className="block font-medium">{slot?.taskText || "Add plan"}</span>
-                        {slot ? <Pill className={cn("mt-1", statusClass[slot.status || "To Do"])}>{slot.status}</Pill> : null}
+                        {slot ? <Pill className={cn("mt-1", statusTone(slot.status || "To Do"))}>{slot.status}</Pill> : null}
                       </button>
                       {slot ? (
                         <button
@@ -1824,7 +2323,7 @@ function Performance() {
                 <td className="mono px-3 py-3">{row.tasks}</td>
                 <td className="mono px-3 py-3">{row.donePercent}%</td>
                 <td className="mono px-3 py-3">{row.overdue}</td>
-                <td className="px-3 py-3"><Pill className={row.rating === "At risk" ? statusClass.Overdue : row.rating === "On track" ? statusClass.Done : statusClass.Revision}>{row.rating}</Pill></td>
+                <td className="px-3 py-3"><Pill className={row.rating === "At risk" ? statusTone("Overdue") : row.rating === "On track" ? statusTone("Done") : statusTone("Revision")}>{row.rating}</Pill></td>
               </tr>
             ))}
           </tbody>
@@ -1996,7 +2495,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="font-semibold">{store.storeName}</h2>
-                    <a className="mt-1 block break-all text-sm text-[var(--accent)]" href={store.previewLink} target="_blank">{store.previewLink}</a>
+                    <a className="mt-1 block break-all text-sm text-[var(--accent)]" href={store.previewLink} target="_blank" rel="noreferrer">{store.previewLink}</a>
                     <p className="mt-1 text-sm text-gray-600">Password: {masked(store.id, store.password, true)}</p>
                   </div>
                   <div className="flex gap-2">
@@ -2261,6 +2760,7 @@ export default function App() {
       <Route path="/" element={<Navigate to={sessionAccountId ? "/dashboard" : "/login"} replace />} />
       <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
       <Route path="/projects" element={<RequireAuth><Projects /></RequireAuth>} />
+      <Route path="/projects/:projectId" element={<RequireAuth><ProjectDetail /></RequireAuth>} />
       <Route path="/delivered" element={<Navigate to="/projects?filter=delivered" replace />} />
       <Route path="/tasks" element={<RequireAuth><Tasks /></RequireAuth>} />
       <Route path="/updates" element={<RequireAuth><Updates /></RequireAuth>} />
