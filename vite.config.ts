@@ -8,6 +8,7 @@ const apiModules: Record<string, string> = {
   "/api/create-user": "api/create-user.js",
   "/api/update-password": "api/update-password.js",
   "/api/ensure-admin-profile": "api/ensure-admin-profile.js",
+  "/api/login-credentials": "api/login-credentials.js",
 };
 
 async function readBody(req: any) {

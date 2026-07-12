@@ -351,6 +351,14 @@ function Pill({ children, className }: { children: ReactNode; className?: string
 }
 
 type ActionStatus = { tone: "success" | "error" | "info"; message: string };
+type LoginCredential = {
+  id: string;
+  name: string;
+  username: string;
+  password: string;
+  accessRole: "Admin" | "Employee";
+  updatedAt?: string | null;
+};
 
 function ActionNotice({ status }: { status?: ActionStatus }) {
   if (!status) return null;
@@ -391,21 +399,48 @@ function Login() {
   const [loginMode, setLoginMode] = useState<"Admin" | "Employee">("Admin");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [credentials, setCredentials] = useState<LoginCredential[]>([]);
+  const [credentialsStatus, setCredentialsStatus] = useState<ActionStatus>();
   const navigate = useNavigate();
-  const demoCredentials = {
-    Admin: { username: "admin", password: "admin123" },
-    Employee: { username: "kunal", password: "kunal123" },
-  } as const;
+  const admins = credentials.filter((credential) => credential.accessRole === "Admin");
+  const employees = credentials.filter((credential) => credential.accessRole === "Employee");
+  const currentModeCredentials = loginMode === "Admin" ? admins : employees;
+
+  async function loadLoginCredentials(autofill = false) {
+    setCredentialsStatus(undefined);
+    try {
+      const response = await fetch("/api/login-credentials");
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error || "Could not load login credentials.");
+      const nextCredentials = (result.credentials || []) as LoginCredential[];
+      setCredentials(nextCredentials);
+      const preferred = nextCredentials.find((credential) => credential.accessRole === loginMode) || nextCredentials[0];
+      if (autofill && preferred) {
+        setUsername(preferred.username);
+        setPassword(preferred.password);
+      }
+    } catch (error) {
+      setCredentialsStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not load login credentials." });
+      setCredentials([
+        { id: "fallback-admin", name: "Open Limits Admin", username: "admin", password: "admin123", accessRole: "Admin" },
+      ]);
+    }
+  }
+
+  useEffect(() => {
+    void loadLoginCredentials(true);
+    const interval = window.setInterval(() => void loadLoginCredentials(false), 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   function switchMode(mode: "Admin" | "Employee") {
     setLoginMode(mode);
-    if (mode === "Admin") {
-      setUsername("admin");
-      setPassword("admin123");
-    } else {
-      setUsername("kunal");
-      setPassword("kunal123");
+    const preferred = credentials.find((credential) => credential.accessRole === mode);
+    if (preferred) {
+      setUsername(preferred.username);
+      setPassword(preferred.password);
     }
   }
 
@@ -461,24 +496,52 @@ function Login() {
             <button
               type="button"
               onClick={() => {
-                setUsername(demoCredentials[loginMode].username);
-                setPassword(demoCredentials[loginMode].password);
+                const preferred = currentModeCredentials[0];
+                if (!preferred) return;
+                setUsername(preferred.username);
+                setPassword(preferred.password);
               }}
               className="rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
             >
               Use {loginMode}
             </button>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-md bg-white/70 p-2">
-              <p className="text-xs font-semibold uppercase text-amber-700">Admin</p>
-              <p className="mono mt-1">ID: admin</p>
-              <p className="mono">Password: admin123</p>
-            </div>
-            <div className="rounded-md bg-white/70 p-2">
-              <p className="text-xs font-semibold uppercase text-amber-700">Employee</p>
-              <p className="mono mt-1">ID: kunal</p>
-              <p className="mono">Password: kunal123</p>
+          <ActionNotice status={credentialsStatus} />
+          <div className="mt-2 grid max-h-64 gap-2 overflow-y-auto pr-1">
+            {(["Admin", "Employee"] as const).map((role) => (
+              <div key={role} className="rounded-md bg-white/70 p-2">
+                <p className="text-xs font-semibold uppercase text-amber-700">{role} IDs</p>
+                <div className="mt-1 grid gap-1">
+                  {credentials.filter((credential) => credential.accessRole === role).map((credential) => (
+                    <button
+                      key={credential.id}
+                      type="button"
+                      onClick={() => {
+                        setLoginMode(role);
+                        setUsername(credential.username);
+                        setPassword(credential.password);
+                      }}
+                      className="rounded-md px-2 py-1 text-left hover:bg-amber-100"
+                    >
+                      <span className="block text-sm font-semibold">{credential.name}</span>
+                      <span className="mono block text-xs">ID: {credential.username}</span>
+                      <span className="mono block text-xs">Password: {credential.password || "Not saved"}</span>
+                    </button>
+                  ))}
+                  {!credentials.filter((credential) => credential.accessRole === role).length ? (
+                    <p className="text-xs text-amber-800">No {role.toLowerCase()} accounts found.</p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void loadLoginCredentials(true)}
+                className="rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                Refresh credentials
+              </button>
             </div>
           </div>
         </div>
@@ -487,12 +550,23 @@ function Login() {
             <input className={inputClass()} value={username} onChange={(e) => setUsername(e.target.value)} />
           </Field>
           <Field label="Password">
-            <input
-              className={inputClass()}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="flex h-9 rounded-md border border-gray-200 bg-white focus-within:border-[var(--accent)]">
+              <input
+                className="min-w-0 flex-1 rounded-md bg-transparent px-3 text-sm text-gray-900 outline-none"
+                type={passwordVisible ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                title={passwordVisible ? "Hide password" : "Show password"}
+                aria-label={passwordVisible ? "Hide password" : "Show password"}
+                onClick={() => setPasswordVisible((value) => !value)}
+                className="inline-flex size-9 items-center justify-center text-gray-500 hover:text-gray-800"
+              >
+                {passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </Field>
           {authError ? <p className="text-sm text-red-600">{authError}</p> : null}
           <Button type="submit" tone="primary" icon={<Lock size={16} />} disabled={loading}>
