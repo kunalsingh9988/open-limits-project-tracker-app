@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -1046,15 +1046,6 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         <input type="checkbox" onChange={(e) => setProject({ ...project, isPriority: e.target.checked })} />
         Priority
       </label>
-      <Field label="Preview link">
-        <input className={inputClass()} onChange={(e) => setProject({ ...project, previewLink: e.target.value })} />
-      </Field>
-      <Field label="Figma link">
-        <input className={inputClass()} onChange={(e) => setProject({ ...project, figmaLink: e.target.value })} />
-      </Field>
-      <Field label="Drive assets">
-        <input className={inputClass()} onChange={(e) => setProject({ ...project, driveAssetsLink: e.target.value })} />
-      </Field>
       <div className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:col-span-3 lg:grid-cols-[1fr_1fr_auto]">
         <Field label="Link name">
           <input className={inputClass()} value={linkDraft.label} onChange={(e) => setLinkDraft({ ...linkDraft, label: e.target.value })} placeholder="Client brief, staging, video..." />
@@ -1326,6 +1317,7 @@ function ProjectCard({
   onDelete: (project: Project) => void | Promise<void>;
 }) {
   const state = useAppStore();
+  const navigate = useNavigate();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
   const isAdmin = user?.accessRole === "Admin";
   const left = daysLeft(project.deadline);
@@ -1422,9 +1414,9 @@ function ProjectCard({
         <select className={cn(inputClass(), "max-w-[190px]")} value={project.status} onChange={(e) => onPatch(project, { status: e.target.value as ProjectStatus })}>
           {Array.from(new Set([...PROJECT_STATUSES, project.status])).map((status) => <option key={status}>{status}</option>)}
         </select>
-        <a href={`/projects/${project.id}`} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-sm font-semibold text-white transition hover:brightness-95">
-          <ExternalLink size={15} /> Open detail
-        </a>
+        <Button tone="primary" icon={<ExternalLink size={15} />} onClick={() => navigate(`/projects/${project.id}`)}>
+          Open detail
+        </Button>
       </div>
     </article>
   );
@@ -1551,6 +1543,7 @@ function ProjectDetail() {
   const [status, setStatus] = useState<ActionStatus>();
   const [linkDraft, setLinkDraft] = useState({ label: "", url: "" });
   const employees = state.accounts.filter((account) => account.accessRole === "Employee" && account.active);
+  const navigate = useNavigate();
 
   if (!project || !scopedProjects(state.projects, user).some((item) => item.id === project.id)) {
     return <EmptyState title="Project not found" detail="This project either does not exist or is not assigned to your account." />;
@@ -1605,7 +1598,12 @@ function ProjectDetail() {
       <PageTitle
         title={project.projectName}
         subtitle={`${project.clientUsername || "No client"} · ${team.length || 0} assigned · ${tasks.length} tasks`}
-        action={<Pill className={statusTone(project.status)}>{project.status}</Pill>}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => navigate("/projects")}>Back to Projects</Button>
+            <Pill className={statusTone(project.status)}>{project.status}</Pill>
+          </div>
+        }
       />
       <div className="mb-4"><ActionNotice status={status} /></div>
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -2747,7 +2745,36 @@ function Help() {
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const sessionAccountId = useAppStore((state) => state.sessionAccountId);
+  const loading = useAppStore((state) => state.loading);
+  const loadRemoteData = useAppStore((state) => state.loadRemoteData);
+  const subscribeRealtime = useAppStore((state) => state.subscribeRealtime);
+  const [checkedSession, setCheckedSession] = useState(false);
   const location = useLocation();
+  useEffect(() => {
+    let mounted = true;
+    if (sessionAccountId) {
+      setCheckedSession(true);
+      return () => {
+        mounted = false;
+      };
+    }
+    setCheckedSession(false);
+    void loadRemoteData().finally(() => {
+      if (!mounted) return;
+      subscribeRealtime();
+      setCheckedSession(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [loadRemoteData, sessionAccountId, subscribeRealtime]);
+  if (!sessionAccountId && (!checkedSession || loading)) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[var(--bg)] px-4 text-sm text-gray-600">
+        Restoring session...
+      </main>
+    );
+  }
   if (!sessionAccountId) return <Navigate to="/login" state={{ from: location }} replace />;
   return <Shell>{children}</Shell>;
 }
