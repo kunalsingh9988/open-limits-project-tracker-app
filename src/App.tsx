@@ -105,6 +105,29 @@ const statusClass: Record<string, string> = {
   Overdue: "bg-red-100 text-red-800",
 };
 
+const TEAM_COLOR_PALETTE = [
+  "#5B5FEF",
+  "#2563EB",
+  "#0891B2",
+  "#0D9488",
+  "#059669",
+  "#65A30D",
+  "#CA8A04",
+  "#EA580C",
+  "#DC2626",
+  "#E11D48",
+  "#DB2777",
+  "#C026D3",
+  "#9333EA",
+  "#7C3AED",
+  "#4F46E5",
+  "#475569",
+  "#64748B",
+  "#A16207",
+  "#B45309",
+  "#0F766E",
+];
+
 function statusTone(status?: string) {
   const key = (status || "").toLowerCase();
   if (status && statusClass[status]) return statusClass[status];
@@ -197,6 +220,66 @@ function Field({
       {label}
       {children}
     </label>
+  );
+}
+
+function ColorTagPicker({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange: (color: string) => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const selected = value || TEAM_COLOR_PALETTE[0];
+  const isCustom = !TEAM_COLOR_PALETTE.some((color) => color.toLowerCase() === selected.toLowerCase());
+
+  return (
+    <div className="grid gap-2">
+      <div className="grid grid-cols-10 gap-2 sm:flex sm:flex-wrap">
+        {TEAM_COLOR_PALETTE.map((color) => {
+          const active = selected.toLowerCase() === color.toLowerCase();
+          return (
+            <button
+              key={color}
+              type="button"
+              title={color}
+              aria-label={`Use color ${color}`}
+              onClick={() => {
+                onChange(color);
+                setCustomOpen(false);
+              }}
+              className={cn(
+                "size-7 rounded-md border transition hover:scale-105",
+                active ? "border-gray-900 ring-2 ring-gray-900/20" : "border-gray-200",
+              )}
+              style={{ backgroundColor: color }}
+            />
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setCustomOpen((open) => !open)}
+          className={cn(
+            "col-span-3 h-7 rounded-md border px-2 text-xs font-semibold text-gray-700 sm:col-span-1",
+            customOpen || isCustom ? "border-[var(--accent)] bg-blue-50" : "border-gray-200 bg-white",
+          )}
+        >
+          Custom
+        </button>
+      </div>
+      {(customOpen || isCustom) ? (
+        <div className="flex items-center gap-2">
+          <input
+            className="h-9 w-16 rounded-md border border-gray-200 bg-white p-1"
+            type="color"
+            value={selected}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          <span className="mono text-xs text-gray-500">{selected}</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -844,7 +927,7 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
   const [project, setProject] = useState<Partial<Project>>({ status: "Not Started", isPriority: false, projectDocuments: [], projectLinks: [] });
   const statusOptions = Array.from(new Set([...PROJECT_STATUSES, ...state.projects.map((item) => item.status), project.status].filter(Boolean))) as string[];
   const [newMemberFor, setNewMemberFor] = useState<"developer" | "designer" | null>(null);
-  const [newMember, setNewMember] = useState({ name: "", username: "", password: "" });
+  const [newMember, setNewMember] = useState({ name: "", username: "", password: "", colorTag: TEAM_COLOR_PALETTE[0] });
   const [newStatus, setNewStatus] = useState("");
   const [addingStatus, setAddingStatus] = useState(false);
   const [linkDraft, setLinkDraft] = useState({ label: "", url: "" });
@@ -869,7 +952,7 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         accessRole: "Employee",
         jobRoleId: roleId,
         role: roleName,
-        colorTag: newMemberFor === "developer" ? "#2563EB" : "#D946EF",
+        colorTag: newMember.colorTag,
         active: true,
       });
       const created = useAppStore.getState().accounts.find((account) => account.username === newMember.username.trim().toLowerCase());
@@ -879,7 +962,7 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
           [newMemberFor === "developer" ? "mainDeveloperId" : "designerId"]: created.id,
         }));
       }
-      setNewMember({ name: "", username: "", password: "" });
+      setNewMember({ name: "", username: "", password: "", colorTag: TEAM_COLOR_PALETTE[0] });
       setNewMemberFor(null);
       setStatus({ tone: "success", message: `${roleName} account created and selected.` });
     } catch (error) {
@@ -1013,6 +1096,10 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
           <Field label="Password">
             <input className={inputClass()} value={newMember.password} onChange={(e) => setNewMember({ ...newMember, password: e.target.value })} placeholder="temporary password" />
           </Field>
+          <div className="grid gap-1 text-xs font-medium text-gray-600 lg:col-span-3">
+            Color tag
+            <ColorTagPicker value={newMember.colorTag} onChange={(colorTag) => setNewMember({ ...newMember, colorTag })} />
+          </div>
           <div className="flex items-end gap-2">
             <Button onClick={createInlineMember} tone="primary" disabled={saving}>Create</Button>
             <Button onClick={() => setNewMemberFor(null)}>Cancel</Button>
@@ -2515,7 +2602,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
 function Team() {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
-  const [draft, setDraft] = useState<Partial<Account>>({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" });
+  const [draft, setDraft] = useState<Partial<Account>>({ accessRole: "Employee", active: true, colorTag: TEAM_COLOR_PALETTE[0] });
   const [roleDraft, setRoleDraft] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountStatus, setAccountStatus] = useState<{ tone: "success" | "error" | "info"; message: string }>();
@@ -2536,7 +2623,7 @@ function Team() {
     setAccountStatus({ tone: "info", message: "Creating account in Supabase..." });
     try {
       await state.upsertAccount(draft);
-      setDraft({ accessRole: "Employee", active: true, colorTag: "#5B5FEF" });
+      setDraft({ accessRole: "Employee", active: true, colorTag: TEAM_COLOR_PALETTE[0] });
       setAccountStatus({ tone: "success", message: `Created ${username}. They can now log in with ID ${username}.` });
     } catch (error) {
       setAccountStatus({
@@ -2611,7 +2698,10 @@ function Team() {
             <option>Admin</option>
           </select>
         </Field>
-        <Field label="Color tag"><input className={inputClass()} type="color" value={draft.colorTag || "#5B5FEF"} onChange={(e) => setDraft({ ...draft, colorTag: e.target.value })} /></Field>
+        <div className="grid gap-1 text-xs font-medium text-gray-600 md:col-span-3">
+          Color tag
+          <ColorTagPicker value={draft.colorTag} onChange={(colorTag) => setDraft({ ...draft, colorTag })} />
+        </div>
         <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} disabled={accountBusy} onClick={handleAddAccount}>{accountBusy ? "Adding..." : "Add account"}</Button></div>
         <div className="md:col-span-4"><ActionNotice status={accountStatus} /></div>
         <p className="text-xs leading-5 text-gray-500 md:col-span-4">
