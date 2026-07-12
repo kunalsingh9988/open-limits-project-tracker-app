@@ -208,6 +208,10 @@ function Login() {
   const [password, setPassword] = useState("admin123");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const demoCredentials = {
+    Admin: { username: "admin", password: "admin123" },
+    Employee: { username: "kunal", password: "kunal123" },
+  } as const;
 
   function switchMode(mode: "Admin" | "Employee") {
     setLoginMode(mode);
@@ -265,6 +269,33 @@ function Login() {
               {mode}
             </button>
           ))}
+        </div>
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="font-semibold">Building phase login</p>
+            <button
+              type="button"
+              onClick={() => {
+                setUsername(demoCredentials[loginMode].username);
+                setPassword(demoCredentials[loginMode].password);
+              }}
+              className="rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Use {loginMode}
+            </button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-md bg-white/70 p-2">
+              <p className="text-xs font-semibold uppercase text-amber-700">Admin</p>
+              <p className="mono mt-1">ID: admin</p>
+              <p className="mono">Password: admin123</p>
+            </div>
+            <div className="rounded-md bg-white/70 p-2">
+              <p className="text-xs font-semibold uppercase text-amber-700">Employee</p>
+              <p className="mono mt-1">ID: kunal</p>
+              <p className="mono">Password: kunal123</p>
+            </div>
+          </div>
         </div>
         <div className="grid gap-3">
           <Field label="Username">
