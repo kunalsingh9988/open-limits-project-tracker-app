@@ -128,6 +128,59 @@ const TEAM_COLOR_PALETTE = [
   "#0F766E",
 ];
 
+function normalizeColor(color?: string) {
+  return (color || "").trim().toLowerCase();
+}
+
+function employeeAssignedColors(accounts: Account[]) {
+  return new Set(
+    accounts
+      .filter((account) => account.accessRole === "Employee" && account.active)
+      .map((account) => normalizeColor(account.colorTag))
+      .filter(Boolean),
+  );
+}
+
+function generatedTeamColor(index: number) {
+  const hue = (index * 137.508) % 360;
+  const saturation = 68;
+  const lightness = 38;
+  const chroma = (1 - Math.abs((2 * lightness) / 100 - 1)) * (saturation / 100);
+  const huePrime = hue / 60;
+  const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+  const [r1, g1, b1] =
+    huePrime < 1 ? [chroma, x, 0] :
+    huePrime < 2 ? [x, chroma, 0] :
+    huePrime < 3 ? [0, chroma, x] :
+    huePrime < 4 ? [0, x, chroma] :
+    huePrime < 5 ? [x, 0, chroma] :
+    [chroma, 0, x];
+  const m = lightness / 100 - chroma / 2;
+  return [r1, g1, b1]
+    .map((channel) => Math.round((channel + m) * 255).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase()
+    .replace(/^/, "#");
+}
+
+function availableTeamColors(accounts: Account[]) {
+  const used = employeeAssignedColors(accounts);
+  const presetColors = TEAM_COLOR_PALETTE.filter((color) => !used.has(normalizeColor(color)));
+  if (presetColors.length) return presetColors;
+
+  const generated: string[] = [];
+  for (let index = 0; generated.length < 8 && index < 200; index += 1) {
+    const color = generatedTeamColor(index + TEAM_COLOR_PALETTE.length);
+    if (!used.has(normalizeColor(color)) && !generated.includes(color)) generated.push(color);
+  }
+  return generated;
+}
+
+function autoTeamColor(accounts: Account[]) {
+  const available = availableTeamColors(accounts);
+  return available[Math.floor(Math.random() * available.length)] || TEAM_COLOR_PALETTE[0];
+}
+
 function statusTone(status?: string) {
   const key = (status || "").toLowerCase();
   if (status && statusClass[status]) return statusClass[status];
@@ -226,18 +279,32 @@ function Field({
 function ColorTagPicker({
   value,
   onChange,
+  availableColors,
 }: {
   value?: string;
   onChange: (color: string) => void;
+  availableColors: string[];
 }) {
-  const [customOpen, setCustomOpen] = useState(false);
-  const selected = value || TEAM_COLOR_PALETTE[0];
-  const isCustom = !TEAM_COLOR_PALETTE.some((color) => color.toLowerCase() === selected.toLowerCase());
+  const [expanded, setExpanded] = useState(false);
+  const selected = value || availableColors[0] || TEAM_COLOR_PALETTE[0];
+  const options = Array.from(new Set([selected, ...availableColors])).filter(Boolean);
 
   return (
     <div className="grid gap-2">
-      <div className="grid grid-cols-10 gap-2 sm:flex sm:flex-wrap">
-        {TEAM_COLOR_PALETTE.map((color) => {
+      <button
+        type="button"
+        onClick={() => setExpanded((open) => !open)}
+        className="flex h-9 w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      >
+        <span className="flex items-center gap-2">
+          <span className="size-5 rounded-md border border-gray-200" style={{ backgroundColor: selected }} />
+          Auto selected color
+        </span>
+        <span className="text-xs text-gray-500">{expanded ? "Hide colors" : "Change"}</span>
+      </button>
+      {expanded ? (
+        <div className="grid grid-cols-8 gap-2 rounded-md border border-gray-100 bg-gray-50 p-2 sm:flex sm:flex-wrap">
+          {options.map((color) => {
           const active = selected.toLowerCase() === color.toLowerCase();
           return (
             <button
@@ -247,7 +314,7 @@ function ColorTagPicker({
               aria-label={`Use color ${color}`}
               onClick={() => {
                 onChange(color);
-                setCustomOpen(false);
+                setExpanded(false);
               }}
               className={cn(
                 "size-7 rounded-md border transition hover:scale-105",
@@ -256,27 +323,7 @@ function ColorTagPicker({
               style={{ backgroundColor: color }}
             />
           );
-        })}
-        <button
-          type="button"
-          onClick={() => setCustomOpen((open) => !open)}
-          className={cn(
-            "col-span-3 h-7 rounded-md border px-2 text-xs font-semibold text-gray-700 sm:col-span-1",
-            customOpen || isCustom ? "border-[var(--accent)] bg-blue-50" : "border-gray-200 bg-white",
-          )}
-        >
-          Custom
-        </button>
-      </div>
-      {(customOpen || isCustom) ? (
-        <div className="flex items-center gap-2">
-          <input
-            className="h-9 w-16 rounded-md border border-gray-200 bg-white p-1"
-            type="color"
-            value={selected}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          <span className="mono text-xs text-gray-500">{selected}</span>
+          })}
         </div>
       ) : null}
     </div>
@@ -927,12 +974,21 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
   const [project, setProject] = useState<Partial<Project>>({ status: "Not Started", isPriority: false, projectDocuments: [], projectLinks: [] });
   const statusOptions = Array.from(new Set([...PROJECT_STATUSES, ...state.projects.map((item) => item.status), project.status].filter(Boolean))) as string[];
   const [newMemberFor, setNewMemberFor] = useState<"developer" | "designer" | null>(null);
-  const [newMember, setNewMember] = useState({ name: "", username: "", password: "", colorTag: TEAM_COLOR_PALETTE[0] });
+  const [newMember, setNewMember] = useState({ name: "", username: "", password: "", colorTag: autoTeamColor(state.accounts) });
   const [newStatus, setNewStatus] = useState("");
   const [addingStatus, setAddingStatus] = useState(false);
   const [linkDraft, setLinkDraft] = useState({ label: "", url: "" });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<ActionStatus>();
+  const inlineAvailableColors = availableTeamColors(state.accounts);
+
+  useEffect(() => {
+    if (!newMemberFor) return;
+    const available = availableTeamColors(state.accounts);
+    if (!available.some((color) => normalizeColor(color) === normalizeColor(newMember.colorTag))) {
+      setNewMember((current) => ({ ...current, colorTag: autoTeamColor(state.accounts) }));
+    }
+  }, [newMember.colorTag, newMemberFor, state.accounts]);
 
   async function createInlineMember() {
     if (!newMemberFor) return;
@@ -942,6 +998,10 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
     }
     const roleName = newMemberFor === "developer" ? "Developer" : "Designer";
     const roleId = state.jobRoles.find((role) => role.name.toLowerCase().includes(roleName.toLowerCase()))?.id || state.jobRoles[0]?.id || "";
+    if (employeeAssignedColors(state.accounts).has(normalizeColor(newMember.colorTag))) {
+      setStatus({ tone: "error", message: "This color is already assigned to another employee. Please choose an available color." });
+      return;
+    }
     setSaving(true);
     setStatus({ tone: "info", message: `Creating ${roleName.toLowerCase()} account...` });
     try {
@@ -962,7 +1022,7 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
           [newMemberFor === "developer" ? "mainDeveloperId" : "designerId"]: created.id,
         }));
       }
-      setNewMember({ name: "", username: "", password: "", colorTag: TEAM_COLOR_PALETTE[0] });
+      setNewMember({ name: "", username: "", password: "", colorTag: autoTeamColor(useAppStore.getState().accounts) });
       setNewMemberFor(null);
       setStatus({ tone: "success", message: `${roleName} account created and selected.` });
     } catch (error) {
@@ -1098,7 +1158,7 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
           </Field>
           <div className="grid gap-1 text-xs font-medium text-gray-600 lg:col-span-3">
             Color tag
-            <ColorTagPicker value={newMember.colorTag} onChange={(colorTag) => setNewMember({ ...newMember, colorTag })} />
+            <ColorTagPicker value={newMember.colorTag} availableColors={inlineAvailableColors} onChange={(colorTag) => setNewMember({ ...newMember, colorTag })} />
           </div>
           <div className="flex items-end gap-2">
             <Button onClick={createInlineMember} tone="primary" disabled={saving}>Create</Button>
@@ -2602,7 +2662,7 @@ function Directory({ inspirationOnly = false }: { inspirationOnly?: boolean }) {
 function Team() {
   const state = useAppStore();
   const user = state.accounts.find((account) => account.id === state.sessionAccountId);
-  const [draft, setDraft] = useState<Partial<Account>>({ accessRole: "Employee", active: true, colorTag: TEAM_COLOR_PALETTE[0] });
+  const [draft, setDraft] = useState<Partial<Account>>({ accessRole: "Employee", active: true, colorTag: autoTeamColor(state.accounts) });
   const [roleDraft, setRoleDraft] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountStatus, setAccountStatus] = useState<{ tone: "success" | "error" | "info"; message: string }>();
@@ -2610,6 +2670,15 @@ function Team() {
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [passwordSavingId, setPasswordSavingId] = useState<string>();
+  const accountAvailableColors = availableTeamColors(state.accounts);
+
+  useEffect(() => {
+    if (draft.accessRole !== "Employee") return;
+    if (!accountAvailableColors.some((color) => normalizeColor(color) === normalizeColor(draft.colorTag))) {
+      setDraft((current) => ({ ...current, colorTag: autoTeamColor(state.accounts) }));
+    }
+  }, [accountAvailableColors, draft.accessRole, draft.colorTag, state.accounts]);
+
   if (user?.accessRole !== "Admin") return <Navigate to="/dashboard" replace />;
 
   async function handleAddAccount() {
@@ -2618,12 +2687,16 @@ function Team() {
       setAccountStatus({ tone: "error", message: "Name, username, and password are required." });
       return;
     }
+    if (draft.accessRole === "Employee" && employeeAssignedColors(state.accounts).has(normalizeColor(draft.colorTag))) {
+      setAccountStatus({ tone: "error", message: "This color is already assigned to another employee. Please choose an available color." });
+      return;
+    }
 
     setAccountBusy(true);
     setAccountStatus({ tone: "info", message: "Creating account in Supabase..." });
     try {
       await state.upsertAccount(draft);
-      setDraft({ accessRole: "Employee", active: true, colorTag: TEAM_COLOR_PALETTE[0] });
+      setDraft({ accessRole: "Employee", active: true, colorTag: autoTeamColor(useAppStore.getState().accounts) });
       setAccountStatus({ tone: "success", message: `Created ${username}. They can now log in with ID ${username}.` });
     } catch (error) {
       setAccountStatus({
@@ -2700,7 +2773,7 @@ function Team() {
         </Field>
         <div className="grid gap-1 text-xs font-medium text-gray-600 md:col-span-3">
           Color tag
-          <ColorTagPicker value={draft.colorTag} onChange={(colorTag) => setDraft({ ...draft, colorTag })} />
+          <ColorTagPicker value={draft.colorTag} availableColors={accountAvailableColors} onChange={(colorTag) => setDraft({ ...draft, colorTag })} />
         </div>
         <div className="flex items-end"><Button tone="primary" icon={<Plus size={16} />} disabled={accountBusy} onClick={handleAddAccount}>{accountBusy ? "Adding..." : "Add account"}</Button></div>
         <div className="md:col-span-4"><ActionNotice status={accountStatus} /></div>

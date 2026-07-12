@@ -129,6 +129,21 @@ function canEditTask(state: AppState, task: Task, patch: Partial<Task>) {
   return Object.keys(patch).every((key) => allowed.has(key));
 }
 
+function colorKey(color?: string) {
+  return (color || "").trim().toLowerCase();
+}
+
+function employeeColorIsTaken(state: AppState, color?: string, accountId?: string) {
+  const key = colorKey(color);
+  if (!key) return false;
+  return state.accounts.some((account) =>
+    account.id !== accountId &&
+    account.accessRole === "Employee" &&
+    account.active &&
+    colorKey(account.colorTag) === key
+  );
+}
+
 async function expectOk<T>(promise: PromiseLike<{ data: T; error: { message: string } | null }>) {
   const { data, error } = await promise;
   if (error) throw new Error(error.message);
@@ -836,6 +851,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         active: account.active ?? true,
         createdAt: nowISO(),
       };
+
+      if (item.accessRole === "Employee" && employeeColorIsTaken(state, item.colorTag, item.id)) {
+        throw new Error("This color is already assigned to another employee.");
+      }
 
       await createAccountWithVercelApi(item, account.passwordHash);
 
